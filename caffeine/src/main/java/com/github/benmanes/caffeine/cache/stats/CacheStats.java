@@ -58,12 +58,12 @@ import com.github.benmanes.caffeine.cache.LoadingCache;
  */
 @Immutable
 public final class CacheStats {
-  private final long hitCount;
-  private final long missCount;
-  private final long loadSuccessCount;
-  private final long loadFailureCount;
-  private final long totalLoadTime;
-  private final long evictionCount;
+  long hitCount;
+  long missCount;
+  long loadSuccessCount;
+  long loadFailureCount;
+  long totalLoadTime;
+  long evictionCount;
 
   /**
    * Constructs a new {@code CacheStats} instance.
@@ -92,6 +92,8 @@ public final class CacheStats {
     this.totalLoadTime = totalLoadTime;
     this.evictionCount = evictionCount;
   }
+
+  CacheStats() {}
 
   /**
    * Returns the number of times {@link Cache} lookup methods have returned either a cached or

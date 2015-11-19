@@ -50,7 +50,7 @@ public final class StatsCounterTest {
 
   @Test
   public void enabled() {
-    ConcurrentStatsCounter counter = new ConcurrentStatsCounter();
+    AtomicStatsCounter counter = new AtomicStatsCounter();
     counter.recordHits(1);
     counter.recordMisses(1);
     counter.recordEviction();
@@ -66,7 +66,7 @@ public final class StatsCounterTest {
 
   @Test
   public void concurrent() {
-    StatsCounter counter = new ConcurrentStatsCounter();
+    StatsCounter counter = new AtomicStatsCounter();
     ConcurrentTestHarness.timeTasks(5, () -> {
       counter.recordHits(1);
       counter.recordMisses(1);
