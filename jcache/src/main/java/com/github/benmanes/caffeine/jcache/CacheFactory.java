@@ -19,18 +19,20 @@ import static java.util.Objects.requireNonNull;
 
 import java.util.Optional;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 
 import javax.annotation.Nullable;
 import javax.cache.CacheManager;
 import javax.cache.configuration.CompleteConfiguration;
 import javax.cache.configuration.Configuration;
+import javax.cache.configuration.Factory;
 import javax.cache.expiry.ExpiryPolicy;
 import javax.cache.integration.CacheLoader;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Expiry;
 import com.github.benmanes.caffeine.cache.Ticker;
+import com.github.benmanes.caffeine.cache.Weigher;
 import com.github.benmanes.caffeine.jcache.configuration.CaffeineConfiguration;
 import com.github.benmanes.caffeine.jcache.configuration.TypesafeConfigurator;
 import com.github.benmanes.caffeine.jcache.event.EventDispatcher;
@@ -47,15 +49,25 @@ import com.typesafe.config.Config;
 final class CacheFactory {
   // Avoid asynchronous executions due to the TCK's poor test practices
   // https://github.com/jsr107/jsr107tck/issues/78
-  private static final boolean USE_DIRECT_EXECUTOR =
+  static final boolean USE_DIRECT_EXECUTOR =
       System.getProperties().containsKey("org.jsr107.tck.management.agentId");
 
-  private final Config rootConfig;
-  private final CacheManager cacheManager;
+  final Config rootConfig;
+  final CacheManager cacheManager;
 
   public CacheFactory(CacheManager cacheManager, Config rootConfig) {
     this.cacheManager = requireNonNull(cacheManager);
     this.rootConfig = requireNonNull(rootConfig);
+  }
+
+  /**
+   * Returns a if the cache definition is found in the external settings file.
+   *
+   * @param cacheName the name of the cache
+   * @return {@code true} if a definition exists
+   */
+  public boolean isDefinedExternally(String cacheName) {
+    return TypesafeConfigurator.cacheNames(rootConfig).contains(cacheName);
   }
 
   /**
@@ -83,23 +95,32 @@ final class CacheFactory {
   }
 
   /** Copies the configuration and overlays it on top of the default settings. */
+  @SuppressWarnings("PMD.AccessorMethodGeneration")
   private <K, V> CaffeineConfiguration<K, V> resolveConfigurationFor(
       Configuration<K, V> configuration) {
     if (configuration instanceof CaffeineConfiguration<?, ?>) {
       return new CaffeineConfiguration<>((CaffeineConfiguration<K, V>) configuration);
     }
 
-    CaffeineConfiguration<K, V> defaults = TypesafeConfigurator.defaults(rootConfig);
+    CaffeineConfiguration<K, V> template = TypesafeConfigurator.defaults(rootConfig);
     if (configuration instanceof CompleteConfiguration<?, ?>) {
-      CaffeineConfiguration<K, V> config = new CaffeineConfiguration<>(
-          (CompleteConfiguration<K, V>) configuration);
-      config.setCopierFactory(defaults.getCopierFactory());
-      return config;
+      CompleteConfiguration<K, V> complete = (CompleteConfiguration<K, V>) configuration;
+      template.setReadThrough(complete.isReadThrough());
+      template.setWriteThrough(complete.isWriteThrough());
+      template.setManagementEnabled(complete.isManagementEnabled());
+      template.setStatisticsEnabled(complete.isStatisticsEnabled());
+      template.getCacheEntryListenerConfigurations()
+          .forEach(template::removeCacheEntryListenerConfiguration);
+      complete.getCacheEntryListenerConfigurations()
+          .forEach(template::addCacheEntryListenerConfiguration);
+      template.setCacheLoaderFactory(complete.getCacheLoaderFactory());
+      template.setCacheWriterFactory(complete.getCacheWriterFactory());
+      template.setExpiryPolicyFactory(complete.getExpiryPolicyFactory());
     }
 
-    defaults.setTypes(configuration.getKeyType(), configuration.getValueType());
-    defaults.setStoreByValue(configuration.isStoreByValue());
-    return defaults;
+    template.setTypes(configuration.getKeyType(), configuration.getValueType());
+    template.setStoreByValue(configuration.isStoreByValue());
+    return template;
   }
 
   /** A one-shot builder for creating a cache instance. */
@@ -107,7 +128,7 @@ final class CacheFactory {
     final Ticker ticker;
     final String cacheName;
     final Executor executor;
-    final ExpiryPolicy expiry;
+    final ExpiryPolicy expiryPolicy;
     final EventDispatcher<K, V> dispatcher;
     final JCacheStatisticsMXBean statistics;
     final Caffeine<Object, Object> caffeine;
@@ -122,8 +143,8 @@ final class CacheFactory {
       this.caffeine = Caffeine.newBuilder();
       this.statistics = new JCacheStatisticsMXBean();
       this.ticker = config.getTickerFactory().create();
-      this.expiry = config.getExpiryPolicyFactory().create();
-      this.executor = USE_DIRECT_EXECUTOR ? Runnable::run : ForkJoinPool.commonPool();
+      this.expiryPolicy = config.getExpiryPolicyFactory().create();
+      this.executor = USE_DIRECT_EXECUTOR ? Runnable::run : config.getExecutorFactory().create();
       this.dispatcher = new EventDispatcher<>(executor);
 
       caffeine.executor(executor);
@@ -136,7 +157,8 @@ final class CacheFactory {
     /** Creates a configured cache. */
     public CacheProxy<K, V> build() {
       boolean evicts = configureMaximumSize() || configureMaximumWeight()
-          || configureExpireAfterWrite() || configureExpireAfterAccess();
+          || configureExpireAfterWrite() || configureExpireAfterAccess()
+          || configureExpireVariably();
       if (evicts) {
         configureEvictionListener();
       }
@@ -163,15 +185,15 @@ final class CacheFactory {
     /** Creates a cache that does not read through on a cache miss. */
     private CacheProxy<K, V> newCacheProxy() {
       return new CacheProxy<>(cacheName, executor, cacheManager, config, caffeine.build(),
-          dispatcher, Optional.ofNullable(cacheLoader), expiry, ticker, statistics);
+          dispatcher, Optional.ofNullable(cacheLoader), expiryPolicy, ticker, statistics);
     }
 
     /** Creates a cache that reads through on a cache miss. */
     private CacheProxy<K, V> newLoadingCacheProxy() {
       JCacheLoaderAdapter<K, V> adapter = new JCacheLoaderAdapter<>(
-          cacheLoader, dispatcher, expiry, ticker, statistics);
+          cacheLoader, dispatcher, expiryPolicy, ticker, statistics);
       CacheProxy<K, V> cache = new LoadingCacheProxy<>(cacheName, executor, cacheManager,
-          config, caffeine.build(adapter), dispatcher, cacheLoader, expiry, ticker, statistics);
+          config, caffeine.build(adapter), dispatcher, cacheLoader, expiryPolicy, ticker, statistics);
       adapter.setCache(cache);
       return cache;
     }
@@ -188,7 +210,11 @@ final class CacheFactory {
     private boolean configureMaximumWeight() {
       if (config.getMaximumWeight().isPresent()) {
         caffeine.maximumWeight(config.getMaximumWeight().getAsLong());
-        caffeine.weigher(config.getWeigherFactory().create());
+        Weigher<K, V> weigher = config.getWeigherFactory().map(Factory::create)
+            .orElseThrow(() -> new IllegalStateException("Weigher not configured"));
+        caffeine.weigher((K key, Expirable<V> expirable) -> {
+          return weigher.weigh(key, expirable.get());
+        });
       }
       return config.getMaximumWeight().isPresent();
     }
@@ -209,11 +235,31 @@ final class CacheFactory {
       return config.getExpireAfterAccess().isPresent();
     }
 
-    private boolean configureRefreshAfterWrite() {
+    /** Configures the write expiration and returns if set. */
+    private boolean configureExpireVariably() {
+      config.getExpiryFactory().ifPresent(factory -> {
+        Expiry<K, V> expiry = factory.create();
+        caffeine.expireAfter(new Expiry<K, Expirable<V>>() {
+          @Override public long expireAfterCreate(K key, Expirable<V> expirable, long currentTime) {
+            return expiry.expireAfterCreate(key, expirable.get(), currentTime);
+          }
+          @Override public long expireAfterUpdate(K key, Expirable<V> expirable,
+              long currentTime, long currentDuration) {
+            return expiry.expireAfterUpdate(key, expirable.get(), currentTime, currentDuration);
+          }
+          @Override public long expireAfterRead(K key, Expirable<V> expirable,
+              long currentTime, long currentDuration) {
+            return expiry.expireAfterRead(key, expirable.get(), currentTime, currentDuration);
+          }
+        });
+      });
+      return config.getExpireAfterWrite().isPresent();
+    }
+
+    private void configureRefreshAfterWrite() {
       if (config.getRefreshAfterWrite().isPresent()) {
         caffeine.refreshAfterWrite(config.getRefreshAfterWrite().getAsLong(), TimeUnit.NANOSECONDS);
       }
-      return config.getRefreshAfterWrite().isPresent();
     }
 
     /** Configures the removal listener. */

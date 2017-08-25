@@ -11,20 +11,23 @@ dependencies {
   compile libraries.ycsb
   compile libraries.guava
   compile libraries.stream
-  compile libraries.flip_tables
-  compile libraries.commons_lang3
-  compile libraries.commons_compress
-  compile benchmark_libraries.tcache
-  compile libraries.univocity_parsers
-  compile benchmark_libraries.cache2k
-  compile benchmark_libraries.ehcache2
-  compile benchmark_libraries.ehcache3
-  compile benchmark_libraries.collision
-  compile benchmark_libraries.slf4j_nop
-  compile benchmark_libraries.infinispan
-  compile benchmark_libraries.elastic_search
+  compile libraries.fastutil
+  compile libraries.flipTables
+  compile benchmarkLibraries.ohc
+  compile libraries.commonsLang3
+  compile libraries.commonsCompress
+  compile benchmarkLibraries.tcache
+  compile libraries.univocityParsers
+  compile benchmarkLibraries.cache2k
+  compile benchmarkLibraries.ehcache2
+  compile benchmarkLibraries.ehcache3
+  compile benchmarkLibraries.rapidoid
+  compile benchmarkLibraries.collision
+  compile benchmarkLibraries.slf4jNop
+  compile benchmarkLibraries.expiringMap
+  compile benchmarkLibraries.elasticSearch
 
-  testCompile test_libraries.testng  
+  testCompile testLibraries.testng
 }
 
 test {
@@ -35,6 +38,10 @@ coverity {
   skip = true
 }
 
+sonarqube {
+  skipProject = true
+}
+
 tasks.withType(Javadoc) {
   options.addStringOption('Xdoclint:none', '-quiet')
   // https://github.com/akka/akka/issues/21165
@@ -42,7 +49,7 @@ tasks.withType(Javadoc) {
 }
 
 run {
-  systemProperties System.properties.findAll { 
+  systemProperties System.properties.findAll {
     it.getKey().startsWith('akka') || it.getKey().startsWith('caffeine')
   }
 }

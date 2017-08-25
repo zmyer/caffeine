@@ -1,26 +1,24 @@
 language: java
-sudo: false
+sudo: required
 
 jdk:
   - oraclejdk8
 
 env:
- - TERM=dumb
+  global:
+    - TERM=dumb
+  matrix:
+    - GROUP=analysis
+    - GROUP=tests
 
 before_install:
- - cp gradle.properties.ci gradle.properties
- - export JAVA_OPTS="-Xmx384m -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=0 -noverify"
+  - cp gradle.properties.ci gradle.properties
+  - export JAVA_OPTS="-Xmx384m -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=0 -noverify"
+
+install: true
 
 script:
- - ./gradlew findbugsMain pmdMain -Dfindbugs -Dpmd
- - ./gradlew -Dscan check -x :caffeine:slowCaffeineTest -x :caffeine:slowGuavaTest
- - travis_wait ./gradlew -Dscan :caffeine:slowCaffeineTest
- - travis_wait ./gradlew -Dscan :caffeine:slowGuavaTest
- - sh -c 'cd examples/stats-metrics && ./gradlew test'
- - sh -c 'cd examples/write-behind-rxjava && mvn test'
-
-after_success:
-- ./gradlew coveralls uploadArchives
+  - ./travis.sh $GROUP
 
 matrix:
   fast_finish: true
@@ -29,6 +27,10 @@ addons:
   apt:
     packages:
       - oracle-java8-installer
+  sonarcloud:
+    organization: caffeine
+    token:
+      secure: "D40GIdgUfGx75Yso8Zjo/E0dIsW9KDDyId5wbBNuozMkxJcS2qOIK1+Ia3GPHKSvkeSQJ/1wVyl3TGJunGZB/dLoZvrqtKwaLCOa/9TZA1+Uc80W88uvaZ5yhoZP4vCQV3ka+2eRBBYUzYUptK0qdpJxWRyAmPFvOqtnHmDYgb4="
 
 before_cache:
   - rm -f  $HOME/.gradle/caches/modules-2/modules-2.lock
@@ -36,5 +38,6 @@ before_cache:
 cache:
   directories:
     - $HOME/.m2
+    - $HOME/.sonar/cache
     - $HOME/.gradle/caches/
     - $HOME/.gradle/wrapper/

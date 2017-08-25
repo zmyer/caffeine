@@ -18,11 +18,9 @@ package com.github.benmanes.caffeine.cache;
 import static java.util.Objects.requireNonNull;
 
 import java.lang.reflect.Method;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -74,31 +72,25 @@ interface LocalLoadingCache<C extends LocalCache<K, V>, K, V>
 
   /** Sequentially loads each missing entry. */
   default Map<K, V> loadSequentially(Iterable<? extends K> keys) {
+    Set<K> uniqueKeys = new HashSet<>();
+    for (K key : keys) {
+      uniqueKeys.add(key);
+    }
+
     int count = 0;
-    Map<K, V> result = new HashMap<>();
-    Iterator<? extends K> iter = keys.iterator();
-    while (iter.hasNext()) {
-      K key = iter.next();
-      count++;
-      try {
+    Map<K, V> result = new HashMap<>(uniqueKeys.size());
+    try {
+      for (K key : uniqueKeys) {
+        count++;
+
         V value = get(key);
         if (value != null) {
           result.put(key, value);
         }
-      } catch (Throwable t) {
-        int remaining;
-        if (keys instanceof Collection<?>) {
-          remaining = ((Collection<?>) keys).size() - count;
-        } else {
-          remaining = 0;
-          while (iter.hasNext()) {
-            remaining++;
-            iter.next();
-          }
-        }
-        cache().statsCounter().recordMisses(remaining);
-        throw t;
       }
+    } catch (Throwable t) {
+      cache().statsCounter().recordMisses(uniqueKeys.size() - count);
+      throw t;
     }
     return Collections.unmodifiableMap(result);
   }
@@ -153,6 +145,7 @@ interface LocalLoadingCache<C extends LocalCache<K, V>, K, V>
   }
 
   @Override
+  @SuppressWarnings("FutureReturnValueIgnored")
   default void refresh(K key) {
     requireNonNull(key);
 

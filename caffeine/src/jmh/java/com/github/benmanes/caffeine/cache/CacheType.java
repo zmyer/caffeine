@@ -18,10 +18,6 @@ package com.github.benmanes.caffeine.cache;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.jackrabbit.oak.cache.CacheLIRS;
-import org.infinispan.commons.equivalence.AnyEquivalence;
-import org.infinispan.commons.util.concurrent.jdk8backported.BoundedEquivalentConcurrentHashMapV8;
-import org.infinispan.commons.util.concurrent.jdk8backported.BoundedEquivalentConcurrentHashMapV8.Eviction;
-import org.infinispan.util.concurrent.BoundedConcurrentHashMap;
 import org.jctools.maps.NonBlockingHashMap;
 
 import com.github.benmanes.caffeine.cache.impl.Cache2k;
@@ -32,12 +28,15 @@ import com.github.benmanes.caffeine.cache.impl.ConcurrentMapCache;
 import com.github.benmanes.caffeine.cache.impl.Ehcache2;
 import com.github.benmanes.caffeine.cache.impl.Ehcache3;
 import com.github.benmanes.caffeine.cache.impl.ElasticSearchCache;
+import com.github.benmanes.caffeine.cache.impl.ExpiringMapCache;
 import com.github.benmanes.caffeine.cache.impl.GuavaCache;
 import com.github.benmanes.caffeine.cache.impl.LinkedHashMapCache;
+import com.github.benmanes.caffeine.cache.impl.RapidoidCache;
 import com.github.benmanes.caffeine.cache.impl.TCache;
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 import com.trivago.triava.tcache.EvictionPolicy;
 
+import net.jodah.expiringmap.ExpirationPolicy;
 import net.sf.ehcache.store.MemoryStoreEvictionPolicy;
 
 /**
@@ -96,7 +95,7 @@ public enum CacheType {
   },
   Ehcache2_Lru {
     @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
-      return new Ehcache2<>(MemoryStoreEvictionPolicy.LRU, maximumSize);
+      return new Ehcache2<>(maximumSize, MemoryStoreEvictionPolicy.LRU);
     }
   },
   Ehcache3 {
@@ -109,24 +108,19 @@ public enum CacheType {
       return new ElasticSearchCache<>(maximumSize);
     }
   },
+  ExpiringMap_Fifo {
+    @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
+      return new ExpiringMapCache<>(maximumSize, ExpirationPolicy.CREATED);
+    }
+  },
+  ExpiringMap_Lru {
+    @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
+      return new ExpiringMapCache<>(maximumSize, ExpirationPolicy.ACCESSED);
+    }
+  },
   Guava {
     @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
       return new GuavaCache<>(maximumSize);
-    }
-  },
-  Infinispan_Old_Lru {
-    @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
-      return new ConcurrentMapCache<>(new BoundedConcurrentHashMap<>(
-          maximumSize, CONCURRENCY_LEVEL, BoundedConcurrentHashMap.Eviction.LRU,
-          AnyEquivalence.getInstance(), AnyEquivalence.getInstance()));
-    }
-  },
-  Infinispan_New_Lru {
-    @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
-      return new ConcurrentMapCache<>(
-          new BoundedEquivalentConcurrentHashMapV8<>(maximumSize, Eviction.LRU,
-              BoundedEquivalentConcurrentHashMapV8.getNullEvictionListener(),
-              AnyEquivalence.getInstance(), AnyEquivalence.getInstance()));
     }
   },
   Jackrabbit {
@@ -140,6 +134,11 @@ public enum CacheType {
   LinkedHashMap_Lru {
     @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
       return new LinkedHashMapCache<>(true, maximumSize);
+    }
+  },
+  Rapidoid {
+    @Override public <K, V> BasicCache<K, V> create(int maximumSize) {
+      return new RapidoidCache<>(maximumSize);
     }
   },
   TCache_Lfu {

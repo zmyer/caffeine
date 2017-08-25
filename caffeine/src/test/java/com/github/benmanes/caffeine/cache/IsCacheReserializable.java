@@ -23,6 +23,7 @@ import org.hamcrest.Description;
 import org.hamcrest.Matcher;
 import org.hamcrest.TypeSafeDiagnosingMatcher;
 
+import com.github.benmanes.caffeine.cache.Async.AsyncExpiry;
 import com.github.benmanes.caffeine.cache.Async.AsyncWeigher;
 import com.github.benmanes.caffeine.testing.DescriptionBuilder;
 import com.google.common.testing.SerializableTester;
@@ -209,13 +210,19 @@ public final class IsCacheReserializable<T> extends TypeSafeDiagnosingMatcher<T>
   private static <K, V> void checkBoundedLocalCache(BoundedLocalCache<K, V> original,
       BoundedLocalCache<K, V> copy, DescriptionBuilder desc) {
     desc.expectThat("empty", copy.estimatedSize(), is(0L));
-    desc.expectThat("same weigher",
-        unwrapWeigher(copy.weigher).getClass(), is(equalTo(
-        unwrapWeigher(original.weigher).getClass())));
+    desc.expectThat("same weigher", unwrapWeigher(copy.weigher).getClass(),
+        is(equalTo(unwrapWeigher(original.weigher).getClass())));
     desc.expectThat("same nodeFactory", copy.nodeFactory, is(original.nodeFactory));
     if (original.evicts()) {
       desc.expectThat("same maximumWeight", copy.maximum(), is(original.maximum()));
       desc.expectThat("same maximumEdenWeight", copy.edenMaximum(), is(original.edenMaximum()));
+    }
+
+    if (original.expiresVariable()) {
+      desc.expectThat("same expiry", unwrapExpiry(copy.expiry()).getClass(),
+          is(equalTo(unwrapExpiry(original.expiry()).getClass())));
+    } else {
+      desc.expectThat("", copy.expiresVariable(), is(false));
     }
 
     if (original.expiresAfterAccess()) {
@@ -248,18 +255,26 @@ public final class IsCacheReserializable<T> extends TypeSafeDiagnosingMatcher<T>
     }
   }
 
-  /* ---------------- Shared -------------- */
-
-  private static <K, V> Weigher<K, V> unwrapWeigher(Weigher<?, ?> weigher) {
+  @SuppressWarnings("unchecked")
+  private static <K, V> Weigher<K, V> unwrapWeigher(Weigher<K, V> weigher) {
     for (;;) {
       if (weigher instanceof BoundedWeigher<?, ?>) {
-        weigher = ((BoundedWeigher<?, ?>) weigher).delegate;
+        weigher = (Weigher<K, V>) ((BoundedWeigher<?, ?>) weigher).delegate;
       } else if (weigher instanceof AsyncWeigher<?, ?>) {
-        weigher = ((AsyncWeigher<?, ?>) weigher).delegate;
+        weigher = (Weigher<K, V>) ((AsyncWeigher<?, ?>) weigher).delegate;
       } else {
-        @SuppressWarnings("unchecked")
-        Weigher<K, V> castedWeigher = (Weigher<K, V>) weigher;
-        return castedWeigher;
+        return weigher;
+      }
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <K, V> Expiry<K, V> unwrapExpiry(Expiry<K, V> expiry) {
+    for (;;) {
+      if (expiry instanceof AsyncExpiry<?, ?>) {
+        expiry = (Expiry<K, V>) ((AsyncExpiry<?, ?>) expiry).delegate;
+      } else {
+        return expiry;
       }
     }
   }

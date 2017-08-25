@@ -35,11 +35,12 @@ public abstract class CountMin4 implements Frequency {
       0xc3a5c85c97cb3127L, 0xb492b66fbe98f273L, 0x9ae16a3b2f90404fL, 0xcbf29ce484222325L};
   static final long RESET_MASK = 0x7777777777777777L;
 
+  protected final boolean conservative;
   protected final int randomSeed;
 
-  protected boolean conservative;
   protected int tableMask;
   protected long[] table;
+  protected int step = 1;
 
   /**
    * Creates a frequency sketch that can accurately estimate the popularity of elements given
@@ -122,10 +123,10 @@ public abstract class CountMin4 implements Frequency {
     int index2 = indexOf(hash, 2);
     int index3 = indexOf(hash, 3);
 
-    boolean added = incrementAt(index0, start);
-    added |= incrementAt(index1, start + 1);
-    added |= incrementAt(index2, start + 2);
-    added |= incrementAt(index3, start + 3);
+    boolean added = incrementAt(index0, start, step);
+    added |= incrementAt(index1, start + 1, step);
+    added |= incrementAt(index2, start + 2, step);
+    added |= incrementAt(index3, start + 3, step);
 
     tryReset(added);
   }
@@ -151,7 +152,7 @@ public abstract class CountMin4 implements Frequency {
 
     for (int i = 0; i < 4; i++) {
       if (count[i] == min) {
-        incrementAt(index[i], start + i);
+        incrementAt(index[i], start + i, step);
       }
     }
     tryReset(true);
@@ -165,13 +166,16 @@ public abstract class CountMin4 implements Frequency {
    *
    * @param i the table index (16 counters)
    * @param j the counter to increment
+   * @param step the increase amount
    * @return if incremented
    */
-  boolean incrementAt(int i, int j) {
+  boolean incrementAt(int i, int j, long step) {
     int offset = j << 2;
     long mask = (0xfL << offset);
     if ((table[i] & mask) != mask) {
-      table[i] += (1L << offset);
+      long current = (table[i] & mask) >>> offset;
+      long update = Math.min(current + step, 15);
+      table[i] = (table[i] & ~mask) | (update << offset);
       return true;
     }
     return false;

@@ -16,6 +16,8 @@
 package com.github.benmanes.caffeine.jcache;
 
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,7 +36,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 import javax.cache.Cache;
@@ -275,7 +276,7 @@ public class CacheProxy<K, V> implements Cache<K, V> {
   private void loadAllAndKeepExisting(Set<? extends K> keys) {
     List<K> keysToLoad = keys.stream()
         .filter(key -> !cache.asMap().containsKey(key))
-        .collect(Collectors.<K>toList());
+        .collect(toList());
     Map<K, V> result = cacheLoader.get().loadAll(keysToLoad);
     for (Map.Entry<K, V> entry : result.entrySet()) {
       if ((entry.getKey() != null) && (entry.getValue() != null)) {
@@ -352,10 +353,8 @@ public class CacheProxy<K, V> implements Cache<K, V> {
         expirable = null;
       }
       boolean created = (expirable == null);
-      long expireTimeMS = expireTimeMS(created
-          ? expiry::getExpiryForCreation
-          : expiry::getExpiryForUpdate);
-      if (expireTimeMS < 0) {
+      long expireTimeMS = getWriteExpireTimeMS(created);
+      if (expireTimeMS == Long.MIN_VALUE) {
         expireTimeMS = expirable.getExpireTimeMS();
       }
       if (expireTimeMS == 0) {
@@ -441,7 +440,7 @@ public class CacheProxy<K, V> implements Cache<K, V> {
       }
 
       absent[0] = true;
-      long expireTimeMS = expireTimeMS(expiry::getExpiryForCreation);
+      long expireTimeMS = getWriteExpireTimeMS(/* created */ true);
       if (expireTimeMS == 0) {
         return null;
       }
@@ -593,8 +592,8 @@ public class CacheProxy<K, V> implements Cache<K, V> {
       if (oldValue.equals(expirable.get())) {
         publishToCacheWriter(writer::write, () -> new EntryProxy<>(key, expirable.get()));
         dispatcher.publishUpdated(this, key, expirable.get(), copyOf(newValue));
-        long expireTimeMS = expireTimeMS(expiry::getExpiryForUpdate);
-        if (expireTimeMS < 0) {
+        long expireTimeMS = getWriteExpireTimeMS(/* created */ false);
+        if (expireTimeMS == Long.MIN_VALUE) {
           expireTimeMS = expirable.getExpireTimeMS();
         }
         result = new Expirable<>(newValue, expireTimeMS);
@@ -686,8 +685,8 @@ public class CacheProxy<K, V> implements Cache<K, V> {
       }
 
       publishToCacheWriter(writer::write, () -> new EntryProxy<>(key, value));
-      long expireTimeMS = expireTimeMS(expiry::getExpiryForUpdate);
-      if (expireTimeMS < 0) {
+      long expireTimeMS = getWriteExpireTimeMS(/* created */ false);
+      if (expireTimeMS == Long.MIN_VALUE) {
         expireTimeMS = expirable.getExpireTimeMS();
       }
       dispatcher.publishUpdated(this, key, expirable.get(), copy);
@@ -747,8 +746,7 @@ public class CacheProxy<K, V> implements Cache<K, V> {
   }
 
   @Override
-  public <T> T invoke(K key, EntryProcessor<K, V, T> entryProcessor, Object... arguments)
-      throws EntryProcessorException {
+  public <T> T invoke(K key, EntryProcessor<K, V, T> entryProcessor, Object... arguments) {
     requireNonNull(entryProcessor);
     requireNonNull(arguments);
     requireNotClosed();
@@ -810,10 +808,7 @@ public class CacheProxy<K, V> implements Cache<K, V> {
         }
         return expirable;
       case READ: {
-        long expireTimeMS = expireTimeMS(expiry::getExpiryForAccess);
-        if (expireTimeMS >= 0) {
-          expirable.setExpireTimeMS(expireTimeMS);
-        }
+        setAccessExpirationTime(expirable, 0L);
         return expirable;
       }
       case CREATED:
@@ -822,13 +817,13 @@ public class CacheProxy<K, V> implements Cache<K, V> {
       case LOADED:
         statistics.recordPuts(1L);
         dispatcher.publishCreated(this, entry.getKey(), entry.getValue());
-        return new Expirable<>(entry.getValue(), expireTimeMS(expiry::getExpiryForCreation));
+        return new Expirable<>(entry.getValue(), getWriteExpireTimeMS(/* created */ true));
       case UPDATED: {
         statistics.recordPuts(1L);
         publishToCacheWriter(writer::write, () -> entry);
         dispatcher.publishUpdated(this, entry.getKey(), expirable.get(), entry.getValue());
-        long expireTimeMS = expireTimeMS(expiry::getExpiryForUpdate);
-        if (expireTimeMS < 0) {
+        long expireTimeMS = getWriteExpireTimeMS(/* created */ false);
+        if (expireTimeMS == Long.MIN_VALUE) {
           expireTimeMS = expirable.getExpireTimeMS();
         }
         return new Expirable<>(entry.getValue(), expireTimeMS);
@@ -838,9 +833,8 @@ public class CacheProxy<K, V> implements Cache<K, V> {
         publishToCacheWriter(writer::delete, entry::getKey);
         dispatcher.publishRemoved(this, entry.getKey(), entry.getValue());
         return null;
-      default:
-        throw new IllegalStateException("Unknown state: " + entry.getAction());
     }
+    throw new IllegalStateException("Unknown state: " + entry.getAction());
   }
 
   @Override
@@ -966,13 +960,13 @@ public class CacheProxy<K, V> implements Cache<K, V> {
   }
 
   /** Writes all of the entries to the cache writer if write-through is enabled. */
-  private <T> CacheWriterException writeAllToCacheWriter(Map<? extends K, ? extends V> map) {
-    if (!configuration.isWriteThrough()  || map.isEmpty()) {
+  private CacheWriterException writeAllToCacheWriter(Map<? extends K, ? extends V> map) {
+    if (!configuration.isWriteThrough() || map.isEmpty()) {
       return null;
     }
     List<Cache.Entry<? extends K, ? extends V>> entries = map.entrySet().stream()
         .map(entry -> new EntryProxy<>(entry.getKey(), entry.getValue()))
-        .collect(Collectors.toList());
+        .collect(toList());
     try {
       writer.writeAll(entries);
       return null;
@@ -990,7 +984,7 @@ public class CacheProxy<K, V> implements Cache<K, V> {
   }
 
   /** Deletes all of the entries using the cache writer, retaining only the keys that succeeded. */
-  private <T> CacheWriterException deleteAllToCacheWriter(Set<? extends K> keys) {
+  private CacheWriterException deleteAllToCacheWriter(Set<? extends K> keys) {
     if (!configuration.isWriteThrough() || keys.isEmpty()) {
       return null;
     }
@@ -1039,13 +1033,13 @@ public class CacheProxy<K, V> implements Cache<K, V> {
    * Returns a deep copy of the map if value-based caching is enabled.
    *
    * @param map the mapping of keys to expirable values
-   * @return a copy of the mappings if storing by value or the same instance if by reference
+   * @return a deep or shallow copy of the mappings depending on the store by value setting
    */
   protected final Map<K, V> copyMap(Map<K, Expirable<V>> map) {
     ClassLoader classLoader = cacheManager.getClassLoader();
-    return map.entrySet().stream().collect(Collectors.toMap(
-        entry -> (K) copier.copy(entry.getKey(), classLoader),
-        entry -> (V) copier.copy(entry.getValue().get(), classLoader)));
+    return map.entrySet().stream().collect(toMap(
+        entry -> copier.copy(entry.getKey(), classLoader),
+        entry -> copier.copy(entry.getValue().get(), classLoader)));
   }
 
   /** @return the current time in milliseconds */
@@ -1074,8 +1068,8 @@ public class CacheProxy<K, V> implements Cache<K, V> {
       } else if (duration.isEternal()) {
         expirable.setExpireTimeMS(Long.MAX_VALUE);
       } else {
-        if (currentTimeMS == 0) {
-          currentTimeMS = ticker.read();
+        if (currentTimeMS == 0L) {
+          currentTimeMS = currentTimeMillis();
         }
         long expireTimeMS = duration.getAdjustedTime(currentTimeMS);
         expirable.setExpireTimeMS(expireTimeMS);
@@ -1086,30 +1080,31 @@ public class CacheProxy<K, V> implements Cache<K, V> {
   }
 
   /**
-   * Returns the time when the entry will expire based on the supplied expiration function.
+   * Returns the time when the entry will expire.
    *
-   * @param expires the expiration function
-   * @return the time when the entry will expire, or negative if the time should not be changed
+   * @param created if the write is an insert or update
+   * @return the time when the entry will expire, zero if it should expire immediately,
+   *         Long.MIN_VALUE if it should not be changed, or Long.MAX_VALUE if eternal
    */
-  protected final long expireTimeMS(Supplier<Duration> expires) {
+  protected final long getWriteExpireTimeMS(boolean created) {
     try {
-      Duration duration = expires.get();
+      Duration duration = created ? expiry.getExpiryForCreation() : expiry.getExpiryForUpdate();
       if (duration == null) {
-        return -1;
+        return Long.MIN_VALUE;
       } else if (duration.isZero()) {
-        return 0;
+        return 0L;
       } else if (duration.isEternal()) {
         return Long.MAX_VALUE;
       }
       return duration.getAdjustedTime(currentTimeMillis());
     } catch (Exception e) {
       logger.log(Level.WARNING, "Failed to get the policy's expiration time", e);
-      return -1;
+      return Long.MIN_VALUE;
     }
   }
 
   /** An iterator to safely expose the cache entries. */
-  private final class EntryIterator implements Iterator<Cache.Entry<K, V>> {
+  final class EntryIterator implements Iterator<Cache.Entry<K, V>> {
     final Iterator<Map.Entry<K, Expirable<V>>> delegate = cache.asMap().entrySet().iterator();
     Map.Entry<K, Expirable<V>> current;
     Map.Entry<K, Expirable<V>> cursor;

@@ -25,10 +25,12 @@ import static com.github.benmanes.caffeine.cache.testing.HasStats.hasMissCount;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.both;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -59,6 +61,7 @@ import com.github.benmanes.caffeine.cache.testing.RejectingCacheWriter.WriteExce
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 
 /**
@@ -249,6 +252,52 @@ public final class CacheTest {
     assertThat(result, is(equalTo(context.original())));
     assertThat(context, both(hasMissCount(0)).and(hasHitCount(result.size())));
     assertThat(context, both(hasLoadSuccessCount(0)).and(hasLoadFailureCount(0)));
+  }
+
+  @CheckNoWriter
+  @Test(dataProvider = "caches")
+  @CacheSpec(population = { Population.SINGLETON, Population.PARTIAL, Population.FULL },
+      removalListener = { Listener.DEFAULT, Listener.REJECTING })
+  public void getAllPresent_duplicates(Cache<Integer, Integer> cache, CacheContext context) {
+    Iterable<Integer> keys = Iterables.concat(
+        context.absentKeys(), context.absentKeys(),
+        context.original().keySet(), context.original().keySet());
+    Map<Integer, Integer> result = cache.getAllPresent(keys);
+
+    int misses = context.absentKeys().size();
+    int hits = context.original().keySet().size();
+    if (context.isGuava()) {
+      // does not filter duplicate queries
+      misses += misses;
+      hits += hits;
+    }
+
+    assertThat(result, is(equalTo(context.original())));
+    assertThat(context, both(hasMissCount(misses)).and(hasHitCount(hits)));
+    assertThat(context, both(hasLoadSuccessCount(0)).and(hasLoadFailureCount(0)));
+  }
+
+  @Test(dataProvider = "caches")
+  @CacheSpec(population = Population.EMPTY, keys = ReferenceType.STRONG, writer = Writer.DISABLED)
+  public void getAllPresent_jdk8186171(Cache<Object, Integer> cache, CacheContext context) {
+    class Key {
+      @Override public int hashCode() {
+        return 0; // to put keys in one bucket
+      }
+    }
+
+    List<Key> keys = new ArrayList<>();
+    for (int i = 0; i < Population.FULL.size(); i++) {
+      keys.add(new Key());
+    }
+
+    Key key = Iterables.getLast(keys);
+    Integer value = context.absentValue();
+    cache.put(key, value);
+
+    Map<Object, Integer> result = cache.getAllPresent(keys);
+    assertThat(result.values(), not(hasItem(nullValue())));
+    assertThat(result, is(equalTo(ImmutableMap.of(key, value))));
   }
 
   /* ---------------- put -------------- */

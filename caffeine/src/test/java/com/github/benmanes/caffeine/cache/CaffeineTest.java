@@ -44,6 +44,7 @@ import com.google.common.util.concurrent.MoreExecutors;
  */
 public final class CaffeineTest {
   @Mock StatsCounter statsCounter;
+  @Mock Expiry<Object, Object> expiry;
   @Mock CacheLoader<Object, Object> loader;
   @Mock CacheWriter<Object, Object> writer;
 
@@ -296,6 +297,11 @@ public final class CaffeineTest {
   }
 
   @Test(expectedExceptions = IllegalStateException.class)
+  public void expireAfterAccess_expiry() {
+    Caffeine.newBuilder().expireAfter(expiry).expireAfterAccess(1, TimeUnit.MILLISECONDS);
+  }
+
+  @Test(expectedExceptions = IllegalStateException.class)
   public void expireAfterAccess_twice() {
     Caffeine.newBuilder().expireAfterAccess(1, TimeUnit.MILLISECONDS)
         .expireAfterAccess(1, TimeUnit.MILLISECONDS);
@@ -326,6 +332,11 @@ public final class CaffeineTest {
   }
 
   @Test(expectedExceptions = IllegalStateException.class)
+  public void expireAfterWrite_expiry() {
+    Caffeine.newBuilder().expireAfter(expiry).expireAfterWrite(1, TimeUnit.MILLISECONDS);
+  }
+
+  @Test(expectedExceptions = IllegalStateException.class)
   public void expireAfterWrite_twice() {
     Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.MILLISECONDS)
         .expireAfterWrite(1, TimeUnit.MILLISECONDS);
@@ -346,6 +357,36 @@ public final class CaffeineTest {
     assertThat(builder.expireAfterWriteNanos, is((long) Integer.MAX_VALUE));
     Expiration<?, ?> expiration = builder.build().policy().expireAfterWrite().get();
     assertThat(expiration.getExpiresAfter(TimeUnit.NANOSECONDS), is((long) Integer.MAX_VALUE));
+  }
+
+
+  /* ---------------- expiry -------------- */
+
+  @Test(expectedExceptions = NullPointerException.class)
+  public void expireAfter_null() {
+    Caffeine.newBuilder().expireAfter(null);
+  }
+
+  @Test(expectedExceptions = IllegalStateException.class)
+  public void expireAfter_twice() {
+    Caffeine.newBuilder().expireAfter(expiry).expireAfter(expiry);
+  }
+
+  @Test(expectedExceptions = IllegalStateException.class)
+  public void expireAfter_access() {
+    Caffeine.newBuilder().expireAfterAccess(1, TimeUnit.MILLISECONDS).expireAfter(expiry);
+  }
+
+  @Test(expectedExceptions = IllegalStateException.class)
+  public void expireAfter_write() {
+    Caffeine.newBuilder().expireAfterWrite(1, TimeUnit.MILLISECONDS).expireAfter(expiry);
+  }
+
+  @Test
+  public void expireAfter() {
+    Caffeine<?, ?> builder = Caffeine.newBuilder().expireAfter(expiry);
+    assertThat(builder.expiry, is(expiry));
+    builder.build();
   }
 
   /* ---------------- refreshAfterWrite -------------- */

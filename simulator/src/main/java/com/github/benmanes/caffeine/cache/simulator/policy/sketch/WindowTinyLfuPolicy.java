@@ -52,7 +52,6 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 public final class WindowTinyLfuPolicy implements Policy {
   private final Long2ObjectMap<Node> data;
   private final PolicyStats policyStats;
-  private final int recencyMoveDistance;
   private final Admittor admittor;
   private final int maximumSize;
 
@@ -65,7 +64,6 @@ public final class WindowTinyLfuPolicy implements Policy {
 
   private int sizeEden;
   private int sizeProtected;
-  private int mainRecencyCounter;
 
   public WindowTinyLfuPolicy(double percentMain, WindowTinyLfuSettings settings) {
     String name = String.format("sketch.WindowTinyLfu (%.0f%%)", 100 * (1.0d - percentMain));
@@ -73,7 +71,6 @@ public final class WindowTinyLfuPolicy implements Policy {
     this.admittor = new TinyLfu(settings.config(), policyStats);
 
     int maxMain = (int) (settings.maximumSize() * percentMain);
-    this.recencyMoveDistance = (int) (maxMain * settings.percentFastPath());
     this.maxProtected = (int) (maxMain * settings.percentMainProtected());
     this.maxEden = settings.maximumSize() - maxMain;
     this.data = new Long2ObjectOpenHashMap<>();
@@ -141,7 +138,6 @@ public final class WindowTinyLfuPolicy implements Policy {
     node.remove();
     node.status = Status.PROTECTED;
     node.appendToTail(headProtected);
-    node.recencyMove = ++mainRecencyCounter;
 
     sizeProtected++;
     if (sizeProtected > maxProtected) {
@@ -155,12 +151,8 @@ public final class WindowTinyLfuPolicy implements Policy {
 
   /** Moves the entry to the MRU position, if it falls outside of the fast-path threshold. */
   private void onProtectedHit(Node node) {
-    // Fast path skips the hottest entries, useful for concurrent caches
-    if (node.recencyMove <= (mainRecencyCounter - recencyMoveDistance)) {
-      admittor.record(node.key);
-      node.moveToTail(headProtected);
-      node.recencyMove = ++mainRecencyCounter;
-    }
+    admittor.record(node.key);
+    node.moveToTail(headProtected);
   }
 
   /**
@@ -210,7 +202,6 @@ public final class WindowTinyLfuPolicy implements Policy {
   static final class Node {
     final long key;
 
-    int recencyMove;
     Status status;
     Node prev;
     Node next;
@@ -254,7 +245,6 @@ public final class WindowTinyLfuPolicy implements Policy {
       return MoreObjects.toStringHelper(this)
           .add("key", key)
           .add("status", status)
-          .add("move", recencyMove)
           .toString();
     }
   }
@@ -268,9 +258,6 @@ public final class WindowTinyLfuPolicy implements Policy {
     }
     public double percentMainProtected() {
       return config().getDouble("window-tiny-lfu.percent-main-protected");
-    }
-    public double percentFastPath() {
-      return config().getDouble("window-tiny-lfu.percent-fast-path");
     }
   }
 }

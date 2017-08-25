@@ -20,6 +20,8 @@ import static java.util.Objects.requireNonNull;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.util.ConcurrentModificationException;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -33,6 +35,7 @@ import java.util.logging.Logger;
 import javax.annotation.Nonnegative;
 import javax.annotation.Nonnull;
 
+import com.github.benmanes.caffeine.cache.Async.AsyncExpiry;
 import com.github.benmanes.caffeine.cache.Async.AsyncRemovalListener;
 import com.github.benmanes.caffeine.cache.Async.AsyncWeigher;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
@@ -83,14 +86,15 @@ import com.github.benmanes.caffeine.cache.stats.StatsCounter;
  * <p>
  * Entries are automatically evicted from the cache when any of
  * {@linkplain #maximumSize(long) maximumSize}, {@linkplain #maximumWeight(long) maximumWeight},
- * {@linkplain #expireAfterWrite expireAfterWrite},
+ * {@linkplain #expireAfter(Expiry) expireAfter}, {@linkplain #expireAfterWrite expireAfterWrite},
  * {@linkplain #expireAfterAccess expireAfterAccess}, {@linkplain #weakKeys weakKeys},
  * {@linkplain #weakValues weakValues}, or {@linkplain #softValues softValues} are requested.
  * <p>
  * If {@linkplain #maximumSize(long) maximumSize} or {@linkplain #maximumWeight(long) maximumWeight}
  * is requested entries may be evicted on each cache modification.
  * <p>
- * If {@linkplain #expireAfterWrite expireAfterWrite} or
+ * If {@linkplain #expireAfter(Expiry) expireAfter},
+ * {@linkplain #expireAfterWrite expireAfterWrite}, or
  * {@linkplain #expireAfterAccess expireAfterAccess} is requested entries may be evicted on each
  * cache modification, on occasional cache accesses, or on calls to {@link Cache#cleanUp}. Expired
  * entries may be counted by {@link Cache#estimatedSize()}, but will never be visible to read or
@@ -108,7 +112,7 @@ import com.github.benmanes.caffeine.cache.stats.StatsCounter;
  * writes. The {@link Cache#cleanUp} method of the returned cache will also perform maintenance, but
  * calling it should not be necessary with a high throughput cache. Only caches built with
  * {@linkplain #maximumSize maximumSize}, {@linkplain #maximumWeight maximumWeight},
- * {@linkplain #expireAfterWrite expireAfterWrite},
+ * {@linkplain #expireAfter(Expiry) expireAfter}, {@linkplain #expireAfterWrite expireAfterWrite},
  * {@linkplain #expireAfterAccess expireAfterAccess}, {@linkplain #weakKeys weakKeys},
  * {@linkplain #weakValues weakValues}, or {@linkplain #softValues softValues} perform periodic
  * maintenance.
@@ -121,11 +125,12 @@ import com.github.benmanes.caffeine.cache.stats.StatsCounter;
  * @param <K> the base key type for all caches created by this builder
  * @param <V> the base value type for all caches created by this builder
  */
+@SuppressWarnings("PMD.TooManyFields")
 public final class Caffeine<K, V> {
   static final Logger logger = Logger.getLogger(Caffeine.class.getName());
   static final Supplier<StatsCounter> ENABLED_STATS_COUNTER_SUPPLIER = ConcurrentStatsCounter::new;
 
-  enum Strength { STRONG, WEAK, SOFT }
+  enum Strength { WEAK, SOFT }
   static final int UNSET_INT = -1;
 
   static final int DEFAULT_INITIAL_CAPACITY = 0;
@@ -146,6 +151,7 @@ public final class Caffeine<K, V> {
   Supplier<StatsCounter> statsCounterSupplier;
   CacheWriter<? super K, ? super V> writer;
   Weigher<? super K, ? super V> weigher;
+  Expiry<? super K, ? super V> expiry;
   Executor executor;
   Ticker ticker;
 
@@ -190,7 +196,7 @@ public final class Caffeine<K, V> {
    */
   @Nonnull
   public static Caffeine<Object, Object> newBuilder() {
-    return new Caffeine<Object, Object>();
+    return new Caffeine<>();
   }
 
   /**
@@ -341,8 +347,8 @@ public final class Caffeine<K, V> {
    * Specifies the weigher to use in determining the weight of entries. Entry weight is taken into
    * consideration by {@link #maximumWeight(long)} when determining which entries to evict, and use
    * of this method requires a corresponding call to {@link #maximumWeight(long)} prior to calling
-   * {@link #build}. Weights are measured and recorded when entries are inserted into the cache, and
-   * are thus effectively static during the lifetime of a cache entry.
+   * {@link #build}. Weights are measured and recorded when entries are inserted into or updated in
+   * the cache, and are thus effectively static during the lifetime of a cache entry.
    * <p>
    * When the weight of an entry is zero it will not be considered for size-based eviction (though
    * it still may be evicted by other means).
@@ -365,8 +371,7 @@ public final class Caffeine<K, V> {
    * @param <V1> value type of the weigher
    * @return the cache builder reference that should be used instead of {@code this} for any
    *         remaining configuration and cache building
-   * @throws IllegalArgumentException if {@code size} is negative
-   * @throws IllegalStateException if a maximum size was already set
+   * @throws IllegalStateException if a weigher was already set
    */
   @Nonnull
   public <K1 extends K, V1 extends V> Caffeine<K1, V1> weigher(
@@ -395,12 +400,12 @@ public final class Caffeine<K, V> {
     return isWeighted() ? maximumWeight : maximumSize;
   }
 
-  @Nonnull @SuppressWarnings("unchecked")
+  @Nonnull @SuppressWarnings({"unchecked", "rawtypes"})
   <K1 extends K, V1 extends V> Weigher<K1, V1> getWeigher(boolean isAsync) {
     Weigher<K1, V1> delegate = isWeighted() && (weigher != Weigher.singletonWeigher())
         ? Weigher.boundedWeigher((Weigher<K1, V1>) weigher)
         : Weigher.singletonWeigher();
-    return (Weigher<K1, V1>) (isAsync ? new AsyncWeigher<>(delegate) : delegate);
+    return isAsync ? (Weigher<K1, V1>) new AsyncWeigher(delegate) : delegate;
   }
 
   /**
@@ -408,7 +413,9 @@ public final class Caffeine<K, V> {
    * {@link WeakReference} (by default, strong references are used).
    * <p>
    * <b>Warning:</b> when this method is used, the resulting cache will use identity ({@code ==})
-   * comparison to determine equality of keys.
+   * comparison to determine equality of keys. Its {@link Cache#asMap} view will therefore
+   * technically violate the {@link Map} specification (in the same way that {@link IdentityHashMap}
+   * does).
    * <p>
    * Entries with keys that have been garbage collected may be counted in
    * {@link Cache#estimatedSize()}, but will never be visible to read or write operations; such
@@ -430,10 +437,6 @@ public final class Caffeine<K, V> {
 
   boolean isStrongKeys() {
     return (keyStrength == null);
-  }
-
-  boolean isWeakKeys() {
-    return (keyStrength == Strength.WEAK);
   }
 
   /**
@@ -468,10 +471,6 @@ public final class Caffeine<K, V> {
 
   boolean isWeakValues() {
     return (valueStrength == Strength.WEAK);
-  }
-
-  boolean isSoftValues() {
-    return (valueStrength == Strength.SOFT);
   }
 
   /**
@@ -516,12 +515,13 @@ public final class Caffeine<K, V> {
    * @param unit the unit that {@code duration} is expressed in
    * @return this builder instance
    * @throws IllegalArgumentException if {@code duration} is negative
-   * @throws IllegalStateException if the time to live or time to idle was already set
+   * @throws IllegalStateException if the time to live or variable expiration was already set
    */
   @Nonnull
   public Caffeine<K, V> expireAfterWrite(@Nonnegative long duration, @Nonnull TimeUnit unit) {
     requireState(expireAfterWriteNanos == UNSET_INT,
         "expireAfterWrite was already set to %s ns", expireAfterWriteNanos);
+    requireState(expiry == null, "expireAfterAccess may not be used with variable expiration");
     requireArgument(duration >= 0, "duration cannot be negative: %s %s", duration, unit);
     this.expireAfterWriteNanos = unit.toNanos(duration);
     return this;
@@ -552,12 +552,13 @@ public final class Caffeine<K, V> {
    * @param unit the unit that {@code duration} is expressed in
    * @return this builder instance
    * @throws IllegalArgumentException if {@code duration} is negative
-   * @throws IllegalStateException if the time to idle or time to live was already set
+   * @throws IllegalStateException if the time to idle or variable expiration was already set
    */
   @Nonnull
   public Caffeine<K, V> expireAfterAccess(@Nonnegative long duration, @Nonnull TimeUnit unit) {
     requireState(expireAfterAccessNanos == UNSET_INT,
         "expireAfterAccess was already set to %s ns", expireAfterAccessNanos);
+    requireState(expiry == null, "expireAfterAccess may not be used with variable expiration");
     requireArgument(duration >= 0, "duration cannot be negative: %s %s", duration, unit);
     this.expireAfterAccessNanos = unit.toNanos(duration);
     return this;
@@ -570,6 +571,50 @@ public final class Caffeine<K, V> {
 
   boolean expiresAfterAccess() {
     return (expireAfterAccessNanos != UNSET_INT);
+  }
+
+  /**
+   * Specifies that each entry should be automatically removed from the cache once a duration has
+   * elapsed after the entry's creation, the most recent replacement of its value, or its last
+   * read. The expiration time is reset by all cache read and write operations (including
+   * {@code Cache.asMap().get(Object)} and {@code Cache.asMap().put(K, V)}), but not by operations
+   * on the collection-views of {@link Cache#asMap}.
+   * <p>
+   * Expired entries may be counted in {@link Cache#estimatedSize()}, but will never be visible to
+   * read or write operations. Expired entries are cleaned up as part of the routine maintenance
+   * described in the class javadoc.
+   *
+   * @param expiry the expiry to use in calculating the expiration time of cache entries
+   * @param <K1> key type of the weigher
+   * @param <V1> value type of the weigher
+   * @return this builder instance
+   * @throws IllegalStateException if expiration was already set
+   */
+  @Nonnull
+  public <K1 extends K, V1 extends V> Caffeine<K1, V1> expireAfter(
+      @Nonnull Expiry<? super K1, ? super V1> expiry) {
+    requireNonNull(expiry);
+    requireState(this.expiry == null, "Expiry was already set to %s", this.expiry);
+    requireState(this.expireAfterAccessNanos == UNSET_INT,
+        "Expiry may not be used with expiresAfterAccess");
+    requireState(this.expireAfterWriteNanos == UNSET_INT,
+        "Expiry may not be used with expiresAfterWrite");
+
+    @SuppressWarnings("unchecked")
+    Caffeine<K1, V1> self = (Caffeine<K1, V1>) this;
+    self.expiry = expiry;
+    return self;
+  }
+
+  boolean expiresVariable() {
+    return expiry != null;
+  }
+
+  @SuppressWarnings("unchecked")
+  Expiry<K, V> getExpiry(boolean isAsync) {
+    return isAsync && (expiry != null)
+        ? (Expiry<K, V>) new AsyncExpiry<>(expiry)
+        : (Expiry<K, V>) expiry;
   }
 
   /**
@@ -630,7 +675,9 @@ public final class Caffeine<K, V> {
 
   @Nonnull
   Ticker getTicker() {
-    return expiresAfterAccess() || expiresAfterWrite() || refreshes() || isRecordingStats()
+    boolean useTicker = expiresVariable() || expiresAfterAccess()
+        || expiresAfterWrite() || refreshes() || isRecordingStats();
+    return useTicker
         ? (ticker == null) ? Ticker.systemTicker() : ticker
         : Ticker.disabledTicker();
   }
@@ -671,16 +718,12 @@ public final class Caffeine<K, V> {
     return self;
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   <K1 extends K, V1 extends V> RemovalListener<K1, V1> getRemovalListener(boolean async) {
-    @SuppressWarnings("unchecked")
     RemovalListener<K1, V1> castedListener = (RemovalListener<K1, V1>) removalListener;
-    if (async && (castedListener != null)) {
-      @SuppressWarnings("unchecked")
-      RemovalListener<K1, V1> asyncListener = (RemovalListener<K1, V1>)
-          new AsyncRemovalListener<K1, V1>(castedListener, getExecutor());
-      return asyncListener;
-    }
-    return castedListener;
+    return async && (castedListener != null)
+        ? new AsyncRemovalListener(castedListener, getExecutor())
+        : castedListener;
   }
 
   /**
@@ -768,7 +811,7 @@ public final class Caffeine<K, V> {
   }
 
   @Nonnull
-  Supplier<? extends StatsCounter> getStatsCounterSupplier() {
+  Supplier<StatsCounter> getStatsCounterSupplier() {
     return (statsCounterSupplier == null)
         ? StatsCounter::disabledStatsCounter
         : statsCounterSupplier;
@@ -779,6 +822,7 @@ public final class Caffeine<K, V> {
         || (maximumWeight != UNSET_INT)
         || (expireAfterAccessNanos != UNSET_INT)
         || (expireAfterWriteNanos != UNSET_INT)
+        || (expiry != null)
         || (keyStrength != null)
         || (valueStrength != null);
   }
@@ -804,8 +848,8 @@ public final class Caffeine<K, V> {
     @SuppressWarnings("unchecked")
     Caffeine<K1, V1> self = (Caffeine<K1, V1>) this;
     return isBounded() || refreshes()
-        ? new BoundedLocalCache.BoundedLocalManualCache<K1, V1>(self)
-        : new UnboundedLocalCache.UnboundedLocalManualCache<K1, V1>(self);
+        ? new BoundedLocalCache.BoundedLocalManualCache<>(self)
+        : new UnboundedLocalCache.UnboundedLocalManualCache<>(self);
   }
 
   /**
@@ -831,8 +875,8 @@ public final class Caffeine<K, V> {
     @SuppressWarnings("unchecked")
     Caffeine<K1, V1> self = (Caffeine<K1, V1>) this;
     return isBounded() || refreshes()
-        ? new BoundedLocalCache.BoundedLocalLoadingCache<K1, V1>(self, loader)
-        : new UnboundedLocalCache.UnboundedLocalLoadingCache<K1, V1>(self, loader);
+        ? new BoundedLocalCache.BoundedLocalLoadingCache<>(self, loader)
+        : new UnboundedLocalCache.UnboundedLocalLoadingCache<>(self, loader);
   }
 
   /**
@@ -886,8 +930,8 @@ public final class Caffeine<K, V> {
     @SuppressWarnings("unchecked")
     Caffeine<K1, V1> self = (Caffeine<K1, V1>) this;
     return isBounded() || refreshes()
-        ? new BoundedLocalCache.BoundedLocalAsyncLoadingCache<K1, V1>(self, loader)
-        : new UnboundedLocalCache.UnboundedLocalAsyncLoadingCache<K1, V1>(self, loader);
+        ? new BoundedLocalCache.BoundedLocalAsyncLoadingCache<>(self, loader)
+        : new UnboundedLocalCache.UnboundedLocalAsyncLoadingCache<>(self, loader);
   }
 
   void requireNonLoadingCache() {
@@ -927,6 +971,9 @@ public final class Caffeine<K, V> {
     }
     if (expireAfterAccessNanos != UNSET_INT) {
       s.append("expireAfterAccess=").append(expireAfterAccessNanos).append("ns, ");
+    }
+    if (expiry != null) {
+      s.append("expiry, ");
     }
     if (refreshNanos != UNSET_INT) {
       s.append("refreshNanos=").append(refreshNanos).append("ns, ");

@@ -21,9 +21,9 @@ import com.github.benmanes.caffeine.cache.simulator.BasicSettings;
 import com.github.benmanes.caffeine.cache.simulator.policy.Policy;
 import com.github.benmanes.caffeine.cache.simulator.policy.PolicyStats;
 import com.google.common.collect.ImmutableSet;
+import com.trivago.triava.tcache.Cache;
 import com.trivago.triava.tcache.TCacheFactory;
-import com.trivago.triava.tcache.core.EvictionInterface;
-import com.trivago.triava.tcache.eviction.Cache;
+import com.trivago.triava.tcache.eviction.EvictionInterface;
 import com.trivago.triava.tcache.eviction.LFUEviction;
 import com.trivago.triava.tcache.eviction.LRUEviction;
 import com.typesafe.config.Config;
@@ -41,7 +41,7 @@ public final class TCachePolicy implements Policy {
     TCacheSettings settings = new TCacheSettings(config);
     policyStats = new PolicyStats("product.TCache");
     cache = TCacheFactory.standardFactory().builder()
-        .setExpectedMapSize(settings.maximumSize())
+        .setMaxElements(settings.maximumSize())
         .setEvictionClass(settings.policy())
         .setStatistics(true)
         .build();
@@ -70,7 +70,7 @@ public final class TCachePolicy implements Policy {
 
   @Override
   public void finished() {
-    cache.shutdown();
+    cache.close();
     policyStats.addEvictions(cache.statistics().getEvictionCount());
   }
 

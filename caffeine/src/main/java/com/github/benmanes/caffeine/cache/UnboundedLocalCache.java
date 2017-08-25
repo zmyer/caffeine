@@ -24,8 +24,9 @@ import java.util.AbstractCollection;
 import java.util.AbstractSet;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -106,23 +107,27 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
 
   @Override
   public Map<K, V> getAllPresent(Iterable<?> keys) {
-    int hits = 0;
-    int misses = 0;
-    Map<K, V> result = new LinkedHashMap<>();
+    Set<Object> uniqueKeys = new HashSet<>();
     for (Object key : keys) {
-      V value = data.get(key);
+      uniqueKeys.add(key);
+    }
+
+    int misses = 0;
+    Map<Object, Object> result = new HashMap<>(uniqueKeys.size());
+    for (Object key : uniqueKeys) {
+      Object value = data.get(key);
       if (value == null) {
         misses++;
       } else {
-        hits++;
-        @SuppressWarnings("unchecked")
-        K castKey = (K) key;
-        result.put(castKey, value);
+        result.put(key, value);
       }
     }
-    statsCounter.recordHits(hits);
     statsCounter.recordMisses(misses);
-    return Collections.unmodifiableMap(result);
+    statsCounter.recordHits(result.size());
+
+    @SuppressWarnings("unchecked")
+    Map<K, V> castedResult = (Map<K, V>) result;
+    return Collections.unmodifiableMap(castedResult);
   }
 
   @Override
@@ -323,6 +328,11 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
   }
 
   @Override
+  public int size() {
+    return data.size();
+  }
+
+  @Override
   public void clear() {
     if (!hasRemovalListener() && (writer == CacheWriter.disabledWriter())) {
       data.clear();
@@ -331,11 +341,6 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     for (K key : data.keySet()) {
       remove(key);
     }
-  }
-
-  @Override
-  public int size() {
-    return data.size();
   }
 
   @Override
@@ -358,14 +363,13 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     return put(key, value, /* notifyWriter */ true);
   }
 
-
   @Override
   public V put(K key, V value, boolean notifyWriter) {
     requireNonNull(value);
 
     // ensures that the removal notification is processed after the removal has completed
     @SuppressWarnings({"unchecked", "rawtypes"})
-    V oldValue[] = (V[]) new Object[1];
+    V[] oldValue = (V[]) new Object[1];
     if ((writer == CacheWriter.disabledWriter()) || !notifyWriter) {
       oldValue[0] = data.put(key, value);
     } else {
@@ -412,7 +416,7 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     @SuppressWarnings("unchecked")
     K castKey = (K) key;
     @SuppressWarnings({"unchecked", "rawtypes"})
-    V oldValue[] = (V[]) new Object[1];
+    V[] oldValue = (V[]) new Object[1];
 
     if (writer == CacheWriter.disabledWriter()) {
       oldValue[0] = data.remove(key);
@@ -441,7 +445,7 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     @SuppressWarnings("unchecked")
     K castKey = (K) key;
     @SuppressWarnings({"unchecked", "rawtypes"})
-    V oldValue[] = (V[]) new Object[1];
+    V[] oldValue = (V[]) new Object[1];
 
     data.computeIfPresent(castKey, (k, v) -> {
       if (v.equals(value)) {
@@ -464,7 +468,7 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     requireNonNull(value);
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    V oldValue[] = (V[]) new Object[1];
+    V[] oldValue = (V[]) new Object[1];
     data.computeIfPresent(key, (k, v) -> {
       if (value != v) {
         writer.write(key, value);
@@ -485,7 +489,7 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
     requireNonNull(newValue);
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    V prev[] = (V[]) new Object[1];
+    V[] prev = (V[]) new Object[1];
     data.computeIfPresent(key, (k, v) -> {
       if (v.equals(oldValue)) {
         if (newValue != v) {
@@ -572,7 +576,7 @@ final class UnboundedLocalCache<K, V> implements LocalCache<K, V> {
 
     @Override
     public Iterator<K> iterator() {
-      return new KeyIterator<K>(cache);
+      return new KeyIterator<>(cache);
     }
 
     @Override

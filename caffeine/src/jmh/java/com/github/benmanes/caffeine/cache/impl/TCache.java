@@ -17,9 +17,9 @@ package com.github.benmanes.caffeine.cache.impl;
 
 import com.github.benmanes.caffeine.cache.BasicCache;
 import com.github.benmanes.caffeine.cache.CacheType;
+import com.trivago.triava.tcache.Cache;
 import com.trivago.triava.tcache.EvictionPolicy;
 import com.trivago.triava.tcache.TCacheFactory;
-import com.trivago.triava.tcache.eviction.Cache;
 
 /**
  * @author ben.manes@gmail.com (Ben Manes)
@@ -30,7 +30,7 @@ public final class TCache<K, V> implements BasicCache<K, V> {
   public TCache(int maximumSize, EvictionPolicy policy) {
     cache = TCacheFactory.standardFactory().<K, V>builder()
         .setConcurrencyLevel(CacheType.CONCURRENCY_LEVEL)
-        .setExpectedMapSize(maximumSize)
+        .setMaxElements(maximumSize)
         .setEvictionPolicy(policy)
         .build();
   }

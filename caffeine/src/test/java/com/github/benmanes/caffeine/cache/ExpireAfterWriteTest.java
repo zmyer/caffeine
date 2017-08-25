@@ -15,6 +15,8 @@
  */
 package com.github.benmanes.caffeine.cache;
 
+import static com.github.benmanes.caffeine.cache.testing.CacheSpec.Expiration.AFTER_WRITE;
+import static com.github.benmanes.caffeine.cache.testing.CacheSpec.Expiration.VARIABLE;
 import static com.github.benmanes.caffeine.cache.testing.CacheWriterVerifier.verifyWriter;
 import static com.github.benmanes.caffeine.cache.testing.HasRemovalNotifications.hasRemovalNotifications;
 import static com.github.benmanes.caffeine.testing.IsEmptyMap.emptyMap;
@@ -38,6 +40,7 @@ import com.github.benmanes.caffeine.cache.Policy.Expiration;
 import com.github.benmanes.caffeine.cache.testing.CacheContext;
 import com.github.benmanes.caffeine.cache.testing.CacheProvider;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec;
+import com.github.benmanes.caffeine.cache.testing.CacheSpec.CacheExpiry;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.Expire;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.Implementation;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.Listener;
@@ -61,7 +64,9 @@ public final class ExpireAfterWriteTest {
   /* ---------------- Cache -------------- */
 
   @Test(dataProvider = "caches")
-  @CacheSpec(expireAfterWrite = Expire.ONE_MINUTE,
+  @CacheSpec(mustExpiresWithAnyOf = { AFTER_WRITE, VARIABLE },
+      expireAfterWrite = { Expire.DISABLED, Expire.ONE_MINUTE },
+      expiry = { CacheExpiry.DISABLED, CacheExpiry.WRITE }, expiryTime = Expire.ONE_MINUTE,
       population = { Population.PARTIAL, Population.FULL })
   public void getIfPresent(Cache<Integer, Integer> cache, CacheContext context) {
     context.ticker().advance(30, TimeUnit.SECONDS);
@@ -78,8 +83,9 @@ public final class ExpireAfterWriteTest {
   }
 
   @Test(dataProvider = "caches")
-  @CacheSpec(expireAfterWrite = Expire.ONE_MINUTE,
-      population = { Population.PARTIAL, Population.FULL })
+  @CacheSpec(population = { Population.PARTIAL, Population.FULL },
+      mustExpiresWithAnyOf = { AFTER_WRITE, VARIABLE }, expireAfterWrite = Expire.ONE_MINUTE,
+      expiry = { CacheExpiry.DISABLED, CacheExpiry.WRITE }, expiryTime = Expire.ONE_MINUTE)
   public void get(Cache<Integer, Integer> cache, CacheContext context) {
     Function<Integer, Integer> mappingFunction = context.original()::get;
     context.ticker().advance(30, TimeUnit.SECONDS);
@@ -96,8 +102,9 @@ public final class ExpireAfterWriteTest {
   }
 
   @Test(dataProvider = "caches")
-  @CacheSpec(expireAfterWrite = Expire.ONE_MINUTE,
-      population = { Population.PARTIAL, Population.FULL })
+  @CacheSpec(population = { Population.PARTIAL, Population.FULL },
+      mustExpiresWithAnyOf = { AFTER_WRITE, VARIABLE }, expireAfterWrite = Expire.ONE_MINUTE,
+      expiry = { CacheExpiry.DISABLED, CacheExpiry.WRITE }, expiryTime = Expire.ONE_MINUTE)
   public void getAllPresent(Cache<Integer, Integer> cache, CacheContext context) {
     context.ticker().advance(30, TimeUnit.SECONDS);
     cache.getAllPresent(context.firstMiddleLastKeys());
@@ -115,8 +122,9 @@ public final class ExpireAfterWriteTest {
   /* ---------------- LoadingCache -------------- */
 
   @Test(dataProvider = "caches")
-  @CacheSpec(expireAfterWrite = Expire.ONE_MINUTE,
-      population = { Population.PARTIAL, Population.FULL })
+  @CacheSpec(population = { Population.PARTIAL, Population.FULL },
+      mustExpiresWithAnyOf = { AFTER_WRITE, VARIABLE }, expireAfterWrite = Expire.ONE_MINUTE,
+      expiry = { CacheExpiry.DISABLED, CacheExpiry.WRITE }, expiryTime = Expire.ONE_MINUTE)
   public void get(LoadingCache<Integer, Integer> cache, CacheContext context) {
     context.ticker().advance(30, TimeUnit.SECONDS);
     cache.get(context.firstKey());
@@ -132,8 +140,10 @@ public final class ExpireAfterWriteTest {
   }
 
   @Test(dataProvider = "caches")
-  @CacheSpec(expireAfterWrite = Expire.ONE_MINUTE, loader = {Loader.IDENTITY, Loader.BULK_IDENTITY},
-      population = { Population.PARTIAL, Population.FULL })
+  @CacheSpec(population = { Population.PARTIAL, Population.FULL },
+      mustExpiresWithAnyOf = { AFTER_WRITE, VARIABLE }, expireAfterWrite = Expire.ONE_MINUTE,
+      expiry = { CacheExpiry.DISABLED, CacheExpiry.WRITE }, expiryTime = Expire.ONE_MINUTE,
+      loader = {Loader.IDENTITY, Loader.BULK_IDENTITY})
   public void getAll(LoadingCache<Integer, Integer> cache, CacheContext context) {
     context.ticker().advance(30, TimeUnit.SECONDS);
     assertThat(cache.getAll(ImmutableList.of(context.firstKey(), context.absentKey())),
@@ -155,8 +165,10 @@ public final class ExpireAfterWriteTest {
   /* ---------------- AsyncLoadingCache -------------- */
 
   @Test(dataProvider = "caches")
-  @CacheSpec(expireAfterWrite = Expire.ONE_MINUTE,
-      population = { Population.PARTIAL, Population.FULL })
+  @CacheSpec(population = { Population.PARTIAL, Population.FULL },
+      mustExpiresWithAnyOf = { AFTER_WRITE, VARIABLE }, expireAfterWrite = Expire.ONE_MINUTE,
+      expiry = { CacheExpiry.DISABLED, CacheExpiry.WRITE }, expiryTime = Expire.ONE_MINUTE)
+  @SuppressWarnings("FutureReturnValueIgnored")
   public void getIfPresent(AsyncLoadingCache<Integer, Integer> cache, CacheContext context) {
     context.ticker().advance(30, TimeUnit.SECONDS);
     cache.getIfPresent(context.firstKey());
@@ -172,7 +184,9 @@ public final class ExpireAfterWriteTest {
   /* ---------------- Map -------------- */
 
   @Test(dataProvider = "caches")
-  @CacheSpec(expireAfterWrite = Expire.ONE_MINUTE, population = Population.FULL)
+  @CacheSpec(population = Population.FULL,
+      mustExpiresWithAnyOf = { AFTER_WRITE, VARIABLE }, expireAfterWrite = Expire.ONE_MINUTE,
+      expiry = { CacheExpiry.DISABLED, CacheExpiry.WRITE }, expiryTime = Expire.ONE_MINUTE)
   public void putIfAbsent(Map<Integer, Integer> map, CacheContext context) {
     context.ticker().advance(30, TimeUnit.SECONDS);
     assertThat(map.putIfAbsent(context.firstKey(), context.absentValue()), is(not(nullValue())));
@@ -189,14 +203,16 @@ public final class ExpireAfterWriteTest {
   /* ---------------- Policy -------------- */
 
   @Test(dataProvider = "caches")
-  @CacheSpec(implementation = Implementation.Caffeine, expireAfterWrite = Expire.ONE_MINUTE)
+  @CacheSpec(implementation = Implementation.Caffeine,
+      mustExpiresWithAnyOf = AFTER_WRITE, expireAfterWrite = Expire.ONE_MINUTE)
   public void getExpiresAfter(CacheContext context,
       @ExpireAfterWrite Expiration<Integer, Integer> expireAfterWrite) {
     assertThat(expireAfterWrite.getExpiresAfter(TimeUnit.MINUTES), is(1L));
   }
 
   @Test(dataProvider = "caches")
-  @CacheSpec(implementation = Implementation.Caffeine, expireAfterWrite = Expire.ONE_MINUTE)
+  @CacheSpec(implementation = Implementation.Caffeine,
+      mustExpiresWithAnyOf = AFTER_WRITE, expireAfterWrite = Expire.ONE_MINUTE)
   public void setExpiresAfter(Cache<Integer, Integer> cache, CacheContext context,
       @ExpireAfterWrite Expiration<Integer, Integer> expireAfterWrite) {
     expireAfterWrite.setExpiresAfter(2, TimeUnit.MINUTES);
@@ -225,7 +241,7 @@ public final class ExpireAfterWriteTest {
   @Test(dataProvider = "caches", expectedExceptions = UnsupportedOperationException.class)
   public void oldest_unmodifiable(CacheContext context,
       @ExpireAfterWrite Expiration<Integer, Integer> expireAfterWrite) {
-    expireAfterWrite.oldest(Integer.MAX_VALUE).clear();;
+    expireAfterWrite.oldest(Integer.MAX_VALUE).clear();
   }
 
   @CacheSpec(implementation = Implementation.Caffeine, expireAfterWrite = Expire.ONE_MINUTE)

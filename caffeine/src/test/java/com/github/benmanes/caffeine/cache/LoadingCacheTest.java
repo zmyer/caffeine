@@ -26,15 +26,19 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.both;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.sameInstance;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -53,11 +57,16 @@ import com.github.benmanes.caffeine.cache.testing.CacheSpec.Implementation;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.Listener;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.Loader;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.Population;
+import com.github.benmanes.caffeine.cache.testing.CacheSpec.ReferenceType;
+import com.github.benmanes.caffeine.cache.testing.CacheSpec.Writer;
 import com.github.benmanes.caffeine.cache.testing.CacheValidationListener;
 import com.github.benmanes.caffeine.cache.testing.CheckNoWriter;
 import com.github.benmanes.caffeine.cache.testing.RemovalNotification;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.primitives.Ints;
 
 /**
  * The test cases for the {@link LoadingCache} interface that simulate the most generic usages.
@@ -243,6 +252,50 @@ public final class LoadingCacheTest {
     assertThat(result, is(equalTo(context.original())));
     assertThat(context, both(hasMissCount(0)).and(hasHitCount(result.size())));
     assertThat(context, both(hasLoadSuccessCount(0)).and(hasLoadFailureCount(0)));
+  }
+
+  @CheckNoWriter
+  @Test(dataProvider = "caches")
+  @CacheSpec(loader = { Loader.NEGATIVE, Loader.BULK_NEGATIVE },
+      population = { Population.SINGLETON, Population.PARTIAL, Population.FULL },
+      removalListener = { Listener.DEFAULT, Listener.REJECTING })
+  public void getAll_duplicates(LoadingCache<Integer, Integer> cache, CacheContext context) {
+    Set<Integer> absentKeys = ImmutableSet.copyOf(Iterables.limit(context.absentKeys(),
+        Ints.saturatedCast(context.maximum().max() - context.initialSize())));
+    Iterable<Integer> keys = Iterables.concat(absentKeys, absentKeys,
+        context.original().keySet(), context.original().keySet());
+    Map<Integer, Integer> result = cache.getAll(keys);
+
+    assertThat(context, hasMissCount(absentKeys.size()));
+    assertThat(context, hasHitCount(context.initialSize()));
+    assertThat(result.keySet(), is(equalTo(ImmutableSet.copyOf(keys))));
+
+    int loads = context.loader().isBulk() ? 1 : absentKeys.size();
+    assertThat(context, both(hasLoadSuccessCount(loads)).and(hasLoadFailureCount(0)));
+  }
+
+  @Test(dataProvider = "caches")
+  @CacheSpec(implementation = Implementation.Caffeine, population = Population.EMPTY,
+      keys = ReferenceType.STRONG, writer = Writer.DISABLED)
+  public void getAll_jdk8186171(CacheContext context) {
+    class Key {
+      @Override public int hashCode() {
+        return 0; // to put keys in one bucket
+      }
+    }
+    LoadingCache<Object, Integer> cache = context.build(key -> null);
+
+    List<Key> keys = new ArrayList<>();
+    for (int i = 0; i < Population.FULL.size(); i++) {
+      keys.add(new Key());
+    }
+    Key key = Iterables.getLast(keys);
+    Integer value = context.absentValue();
+    cache.put(key, value);
+
+    Map<Object, Integer> result = cache.getAll(keys);
+    assertThat(result.values(), not(hasItem(nullValue())));
+    assertThat(result, is(equalTo(ImmutableMap.of(key, value))));
   }
 
   /* ---------------- refresh -------------- */

@@ -44,37 +44,45 @@ In addition, Caffeine offers the following extensions:
  * [Simulation][simulator]
 
 Use Caffeine in a community provided integration:
- * [Spring Cache][spring] (Spring 4.3 & Boot 1.4)
- * [ScalaCache][scala-cache]: Simple caching in Scala
+ * [Spring Cache][spring]: As of Spring 4.3 & Boot 1.4
  * [Scaffeine][scaffeine]: Scala wrapper for Caffeine
+ * [ScalaCache][scala-cache]: Simple caching in Scala
+ * [jooby][jooby]: Modular micro framework
+ * [Druid][druid]: Real-time analytics
+
+Powering infrastructure near you:
+ * [Cassandra][cassandra]:  Manage massive amounts of data, fast
+ * [Infinispan][infinispan]: Distributed in-memory data grid
  * [Ratpack][ratpack]: Lean & powerful HTTP apps
+ * [Camel][camel]: Routing and mediation engine
+ * [Corfu][corfu]: A cluster consistency platform
+ * [Orbit][orbit]: Virtual actors on the JVM
  * [Finagle][finagle]: Extensible RPC system
- * [Druid][druid]: Real-time Analytics
+ * [Neo4j][neo4j]: Graphs for Everyone
 
 ### In the News
 
  * A short look at what Caffeine brings to your applications.
    * [Add a Boost of Caffeine to Your Java][add-a-boost] at [VOXXED][voxxed]
- * A in-depth description of Caffeine's architecture.
-   * [Design of a Modern Cache][modern-cache] at [HighScalability][HighScalability]
+ * An in-depth description of Caffeine's architecture.
+   * [Design of a Modern Cache][modern-cache] ([slides][modern-cache-slides]) at [HighScalability][HighScalability]
  * Caffeine is presented as part of a research paper evaluating its novel eviction policy.
    * [TinyLFU: A Highly Efficient Cache Admission Policy][tinylfu] by Gil Einziger, Roy Friedman, Ben Manes
 
 On the radar,
- * Early discussions with [HBase][hbase], [Cassandra][cassandra], [Solr][solr], and [Infinispan][infinispan]
- * Postgres is [evaluating][postgres] whether to port the cache
- * Go [implementation][go-tinylfu] of the W-TinyLfu policy
+ * Early discussions with [HBase][hbase] and [Solr][solr]
+ * W-TinyLfu implemented by [go-tinylfu][go-tinylfu], [mango-cache][mango-cache], [transitory][transitory], and [ohc][ohc]
 
 ### Download
 
 Download from [Maven Central][maven] or depend via Gradle:
 
 ```gradle
-compile 'com.github.ben-manes.caffeine:caffeine:2.3.5'
+compile 'com.github.ben-manes.caffeine:caffeine:2.5.5'
 
 // Optional extensions
-compile 'com.github.ben-manes.caffeine:guava:2.3.5'
-compile 'com.github.ben-manes.caffeine:jcache:2.3.5'
+compile 'com.github.ben-manes.caffeine:guava:2.5.5'
+compile 'com.github.ben-manes.caffeine:jcache:2.5.5'
 ```
 
 See the [release notes][releases] for details of the changes.
@@ -106,16 +114,24 @@ Snapshots of the development version are available in
 [add-a-boost]: https://www.voxxed.com/blog/2015/12/add-a-boost-of-caffeine-to-your-java
 [voxxed]: https://www.voxxed.com
 [modern-cache]: http://highscalability.com/blog/2016/1/25/design-of-a-modern-cache.html
+[modern-cache-slides]: https://docs.google.com/presentation/d/1NlDxyXsUG1qlVHMl4vsUUBQfAJ2c2NsFPNPr2qymIBs
 [highscalability]: http://highscalability.com
 [spring]: http://docs.spring.io/spring/docs/current/spring-framework-reference/html/cache.html#cache-store-configuration-caffeine
 [scala-cache]: https://github.com/cb372/scalacache
 [scaffeine]: https://github.com/blemale/scaffeine
 [hbase]: https://issues.apache.org/jira/browse/HBASE-15560
-[cassandra]: https://issues.apache.org/jira/browse/CASSANDRA-10855
+[cassandra]: http://cassandra.apache.org
 [solr]: https://issues.apache.org/jira/browse/SOLR-8241
-[infinispan]: https://issues.jboss.org/browse/ISPN-6998
-[postgres]: https://www.mail-archive.com/pgsql-hackers@postgresql.org/msg274326.html
+[infinispan]: http://infinispan.org/docs/stable/user_guide/user_guide.html#eviction_strategy
+[neo4j]: https://github.com/neo4j/neo4j
+[ohc]: https://github.com/snazy/ohc
 [go-tinylfu]: https://github.com/dgryski/go-tinylfu
+[mango-cache]: https://github.com/goburrow/cache
+[transitory]: https://github.com/aholstenson/transitory
 [ratpack]: https://github.com/ratpack/ratpack
 [finagle]: https://github.com/twitter/finagle
-[druid]: https://github.com/druid-io/druid
+[druid]: http://druid.io/docs/latest/development/extensions-core/caffeine-cache.html
+[jooby]: http://jooby.org/doc/caffeine
+[orbit]: https://github.com/orbit/orbit
+[camel]: https://github.com/apache/camel
+[corfu]: https://github.com/CorfuDB/CorfuDB

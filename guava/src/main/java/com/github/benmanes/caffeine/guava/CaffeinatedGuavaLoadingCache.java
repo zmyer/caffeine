@@ -38,13 +38,13 @@ import com.google.common.util.concurrent.UncheckedExecutionException;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
-@SuppressWarnings("deprecation")
+@SuppressWarnings({"deprecation", "OvershadowingSubclassFields"})
 final class CaffeinatedGuavaLoadingCache<K, V> extends CaffeinatedGuavaCache<K, V>
     implements LoadingCache<K, V> {
   static final ThreadLocal<Boolean> nullBulkLoad = ThreadLocal.withInitial(() -> Boolean.FALSE);
   static final long serialVersionUID = 1L;
 
-  final com.github.benmanes.caffeine.cache.LoadingCache<K, V> cache;
+  private final com.github.benmanes.caffeine.cache.LoadingCache<K, V> cache;
 
   CaffeinatedGuavaLoadingCache(com.github.benmanes.caffeine.cache.LoadingCache<K, V> cache) {
     super(cache);

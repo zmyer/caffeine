@@ -28,8 +28,8 @@ import com.google.common.base.Stopwatch;
  * @author Ben Manes (ben.manes@gmail.com)
  */
 public abstract class ProfilerHook {
-  protected static int NUM_THREADS = 8;
-  protected static int DISPLAY_DELAY_SEC = 5;
+  static int DISPLAY_DELAY_SEC = 5;
+  static int NUM_THREADS = 8;
 
   protected final LongAdder calls;
 
@@ -44,6 +44,7 @@ public abstract class ProfilerHook {
 
   protected abstract void profile();
 
+  @SuppressWarnings("FutureReturnValueIgnored")
   private void scheduleStatusTask() {
     Stopwatch stopwatch = Stopwatch.createStarted();
     Executors.newSingleThreadScheduledExecutor().scheduleWithFixedDelay(() -> {

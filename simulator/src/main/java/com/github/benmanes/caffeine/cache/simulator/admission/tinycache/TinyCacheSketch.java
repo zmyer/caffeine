@@ -57,8 +57,9 @@ public final class TinyCacheSketch {
     // time. As far as I understand it is working right now.
     while (TinySetIndexing.chainStart <= TinySetIndexing.chainEnd) {
       try {
-        $ += (cache[TinySetIndexing.chainStart % cache.length] == hashFunc.fpaux.fingerprint) ? 1L
-            : 0L;
+        $ += (cache[TinySetIndexing.chainStart % cache.length] == hashFunc.fpaux.fingerprint)
+            ? 1
+            : 0;
         TinySetIndexing.chainStart++;
 
       } catch (Exception e) {
@@ -72,11 +73,6 @@ public final class TinyCacheSketch {
   /**
    * Implementing add and remove together in one function, means that less items are shifted.
    * (reduction of 3 times from trivial implementation).
-   *
-   * @param fpaux
-   * @param victim
-   * @param bucketStart
-   * @return
    */
   private int replace(HashedItem fpaux, byte victim, int bucketStart, int removedOffset) {
     byte chainId = fpaux.chainId;

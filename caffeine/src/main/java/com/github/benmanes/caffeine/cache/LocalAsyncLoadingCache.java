@@ -25,8 +25,8 @@ import java.util.AbstractSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
@@ -107,7 +107,7 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
   public CompletableFuture<V> get(@Nonnull K key,
       @Nonnull Function<? super K, ? extends V> mappingFunction) {
     requireNonNull(mappingFunction);
-    return get(key, (k1, executor) -> CompletableFuture.<V>supplyAsync(
+    return get(key, (k1, executor) -> CompletableFuture.supplyAsync(
         () -> mappingFunction.apply(key), executor));
   }
 
@@ -117,6 +117,7 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
     return get(key, mappingFunction, /* recordStats */ true);
   }
 
+  @SuppressWarnings("FutureReturnValueIgnored")
   CompletableFuture<V> get(K key,
       BiFunction<? super K, Executor, CompletableFuture<V>> mappingFunction, boolean recordStats) {
     long startTime = cache.statsTicker().read();
@@ -124,10 +125,7 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
     CompletableFuture<V>[] result = new CompletableFuture[1];
     CompletableFuture<V> future = cache.computeIfAbsent(key, k -> {
       result[0] = mappingFunction.apply(key, cache.executor());
-      if (result[0] == null) {
-        cache.statsCounter().recordLoadFailure(cache.statsTicker().read() - startTime);
-      }
-      return result[0];
+      return requireNonNull(result[0]);
     }, recordStats, /* recordLoad */ false);
     if (result[0] != null) {
       AtomicBoolean completed = new AtomicBoolean();
@@ -166,17 +164,24 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
     }
 
     Map<K, CompletableFuture<V>> result = new HashMap<>();
+    Function<K, CompletableFuture<V>> mappingFunction = this::get;
     for (K key : keys) {
-      result.put(key, get(key));
+      CompletableFuture<V> future = result.computeIfAbsent(key, mappingFunction);
+      requireNonNull(future);
     }
     return composeResult(result);
   }
 
   /** Computes all of the missing entries in a single {@link CacheLoader#asyncLoadAll} call. */
+  @SuppressWarnings("FutureReturnValueIgnored")
   private CompletableFuture<Map<K, V>> getAllBulk(Iterable<? extends K> keys) {
     Map<K, CompletableFuture<V>> futures = new HashMap<>();
     Map<K, CompletableFuture<V>> proxies = new HashMap<>();
+
     for (K key : keys) {
+      if (futures.containsKey(key)) {
+        continue;
+      }
       CompletableFuture<V> future = cache.getIfPresent(key, /* recordStats */ false);
       if (future == null) {
         CompletableFuture<V> proxy = new CompletableFuture<>();
@@ -194,9 +199,14 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
       return composeResult(futures);
     }
 
-    loader.asyncLoadAll(proxies.keySet(), cache.executor())
-        .whenComplete(new AsyncBulkCompleter(proxies));
-    return composeResult(futures);
+    AsyncBulkCompleter completer = new AsyncBulkCompleter(proxies);
+    try {
+      loader.asyncLoadAll(proxies.keySet(), cache.executor()).whenComplete(completer);
+      return composeResult(futures);
+    } catch (Throwable t) {
+      completer.accept(/* result */ null, t);
+      throw t;
+    }
   }
 
   /**
@@ -223,6 +233,7 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
   }
 
   @Override
+  @SuppressWarnings("FutureReturnValueIgnored")
   public void put(K key, CompletableFuture<V> valueFuture) {
     if (valueFuture.isCompletedExceptionally()
         || (valueFuture.isDone() && (valueFuture.join() == null))) {
@@ -336,24 +347,28 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
 
     @Override
     public Map<K, V> getAllPresent(Iterable<?> keys) {
-      int hits = 0;
-      int misses = 0;
-      Map<K, V> result = new LinkedHashMap<>();
+      Set<Object> uniqueKeys = new HashSet<>();
       for (Object key : keys) {
+        uniqueKeys.add(key);
+      }
+
+      int misses = 0;
+      Map<Object, Object> result = new HashMap<>();
+      for (Object key : uniqueKeys) {
         CompletableFuture<V> future = cache.get(key);
-        V value = Async.getIfReady(future);
+        Object value = Async.getIfReady(future);
         if (value == null) {
           misses++;
         } else {
-          hits++;
-          @SuppressWarnings("unchecked")
-          K castKey = (K) key;
-          result.put(castKey, value);
+          result.put(key, value);
         }
       }
-      cache.statsCounter().recordHits(hits);
       cache.statsCounter().recordMisses(misses);
-      return Collections.unmodifiableMap(result);
+      cache.statsCounter().recordHits(result.size());
+
+      @SuppressWarnings("unchecked")
+      Map<K, V> castedResult = (Map<K, V>) result;
+      return Collections.unmodifiableMap(castedResult);
     }
 
     @Override
@@ -452,6 +467,7 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
     }
 
     @Override
+    @SuppressWarnings("FutureReturnValueIgnored")
     public void refresh(K key) {
       requireNonNull(key);
 
@@ -543,6 +559,11 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
     }
 
     @Override
+    public void clear() {
+      delegate.clear();
+    }
+
+    @Override
     public boolean containsKey(Object key) {
       return delegate.containsKey(key);
     }
@@ -587,6 +608,28 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
     }
 
     @Override
+    public boolean remove(Object key, Object value) {
+      requireNonNull(key);
+      if (value == null) {
+        return false;
+      }
+      CompletableFuture<V> oldValueFuture = delegate.get(key);
+      if ((oldValueFuture != null) && !value.equals(Async.getWhenSuccessful(oldValueFuture))) {
+        // Optimistically check if the current value is equal, but don't skip if it may be loading
+        return false;
+      }
+
+      @SuppressWarnings("unchecked")
+      K castedKey = (K) key;
+      boolean[] removed = { false };
+      delegate.compute(castedKey, (k, oldValue) -> {
+        removed[0] = value.equals(Async.getWhenSuccessful(oldValue));
+        return removed[0] ? null : oldValue;
+      }, /* recordStats */ false, /* recordLoad */ false);
+      return removed[0];
+    }
+
+    @Override
     public V replace(K key, V value) {
       requireNonNull(value);
       CompletableFuture<V> oldValueFuture =
@@ -599,24 +642,19 @@ abstract class LocalAsyncLoadingCache<C extends LocalCache<K, CompletableFuture<
       requireNonNull(oldValue);
       requireNonNull(newValue);
       CompletableFuture<V> oldValueFuture = delegate.get(key);
-      return oldValue.equals(Async.getIfReady(oldValueFuture))
-          && delegate.replace(key, oldValueFuture, CompletableFuture.completedFuture(newValue));
-    }
-
-    @Override
-    public boolean remove(Object key, Object value) {
-      requireNonNull(key);
-      if (value == null) {
+      if ((oldValueFuture != null) && !oldValue.equals(Async.getWhenSuccessful(oldValueFuture))) {
+        // Optimistically check if the current value is equal, but don't skip if it may be loading
         return false;
       }
-      CompletableFuture<V> oldValueFuture = delegate.get(key);
-      return value.equals(Async.getIfReady(oldValueFuture))
-          && delegate.remove(key, oldValueFuture);
-    }
 
-    @Override
-    public void clear() {
-      delegate.clear();
+      @SuppressWarnings("unchecked")
+      K castedKey = key;
+      boolean[] replaced = { false };
+      delegate.compute(castedKey, (k, value) -> {
+        replaced[0] = oldValue.equals(Async.getWhenSuccessful(value));
+        return replaced[0] ? CompletableFuture.completedFuture(newValue) : value;
+      }, /* recordStats */ false, /* recordLoad */ false);
+      return replaced[0];
     }
 
     @Override

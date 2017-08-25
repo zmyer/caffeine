@@ -55,32 +55,29 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  */
 @SuppressWarnings("PMD.TooManyFields")
 public final class LirsPolicy implements Policy {
-  private final Long2ObjectMap<Node> data;
-  private final PolicyStats policyStats;
-  private final List<Object> evicted;
-  private final Node headNR;
-  private final Node headS;
-  private final Node headQ;
+  final Long2ObjectMap<Node> data;
+  final PolicyStats policyStats;
+  final List<Object> evicted;
+  final Node headNR;
+  final Node headS;
+  final Node headQ;
 
-  private final int maximumNonResidentSize;
-  private final int stackMoveDistance;
-  private final int maximumHotSize;
-  private final int maximumSize;
+  final int maximumNonResidentSize;
+  final int maximumHotSize;
+  final int maximumSize;
 
-  private int sizeS;
-  private int sizeQ;
-  private int sizeNR;
-  private int sizeHot;
-  private int residentSize;
-  private int stackCounter;
+  int sizeS;
+  int sizeQ;
+  int sizeNR;
+  int sizeHot;
+  int residentSize;
 
   // Enable to print out the internal state
-  private static final boolean debug = false;
+  static final boolean debug = false;
 
   public LirsPolicy(Config config) {
     LirsSettings settings = new LirsSettings(config);
     this.maximumNonResidentSize = (int) (settings.maximumSize() * settings.nonResidentMultiplier());
-    this.stackMoveDistance = (int) (settings.maximumSize() * settings.percentFastPath());
     this.maximumHotSize = (int) (settings.maximumSize() * settings.percentHot());
     this.policyStats = new PolicyStats("irr.Lirs");
     this.data = new Long2ObjectOpenHashMap<>();
@@ -122,11 +119,6 @@ public final class LirsPolicy implements Policy {
     // stack, we conduct a stack pruning. This case is illustrated in the transition from state
     // (a) to state (b) in Fig. 2.
     policyStats.recordHit();
-
-    if (node.stackMove > (stackCounter - stackMoveDistance)) {
-      // Fast path to skip the hottest entries, useful for concurrent caches
-      return;
-    }
 
     boolean wasBottom = (headS.prevS == node);
     node.moveToTop(StackType.S);
@@ -350,7 +342,7 @@ public final class LirsPolicy implements Policy {
   enum Status {
     LIR,
     HIR_RESIDENT,
-    HIR_NON_RESIDENT;
+    HIR_NON_RESIDENT,
   }
 
   // S holds three types of blocks, LIR blocks, resident HIR blocks, non-resident HIR blocks
@@ -365,7 +357,7 @@ public final class LirsPolicy implements Policy {
     // stack, Q, with its size of Lhirs.
     Q,
     // Adaption to facilitate the search of the non-resident HIR blocks
-    NR;
+    NR,
   }
 
   // Each entry in the stack records the LIR/HIR status of a block and its residence status,
@@ -374,7 +366,6 @@ public final class LirsPolicy implements Policy {
     final long key;
 
     Status status;
-    int stackMove;
 
     Node prevS;
     Node nextS;
@@ -430,7 +421,6 @@ public final class LirsPolicy implements Policy {
       }
 
       if (stackType == StackType.S) {
-        stackMove = ++stackCounter;
         Node next = headS.nextS;
         headS.nextS = this;
         next.prevS = this;
@@ -503,9 +493,6 @@ public final class LirsPolicy implements Policy {
     }
     public double nonResidentMultiplier() {
       return config().getDouble("lirs.non-resident-multiplier");
-    }
-    public double percentFastPath() {
-      return config().getDouble("lirs.percent-fast-path");
     }
   }
 }

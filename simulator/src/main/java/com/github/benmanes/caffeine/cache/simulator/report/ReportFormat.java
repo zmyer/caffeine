@@ -26,13 +26,14 @@ import com.typesafe.config.Config;
  *
  * @author ben.manes@gmail.com (Ben Manes)
  */
+@SuppressWarnings("ImmutableEnumChecker")
 public enum ReportFormat {
   TABLE(TableReporter::new),
   CSV(CsvReporter::new);
 
   private final Function<Config, Reporter> factory;
 
-  private ReportFormat(Function<Config, Reporter> factory) {
+  ReportFormat(Function<Config, Reporter> factory) {
     this.factory = requireNonNull(factory);
   }
 

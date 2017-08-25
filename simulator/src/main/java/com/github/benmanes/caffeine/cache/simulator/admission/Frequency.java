@@ -27,4 +27,7 @@ public interface Frequency {
 
   /** Increments the popularity of the element. */
   void increment(long e);
+
+  /** Feedback to allow for adaptability. */
+  default void reportMiss() {}
 }

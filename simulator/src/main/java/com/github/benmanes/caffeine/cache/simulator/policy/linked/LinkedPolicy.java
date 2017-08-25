@@ -15,7 +15,6 @@
  */
 package com.github.benmanes.caffeine.cache.simulator.policy.linked;
 
-import static com.google.common.base.Preconditions.checkState;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toSet;
 
@@ -41,12 +40,12 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
  * @author ben.manes@gmail.com (Ben Manes)
  */
 public final class LinkedPolicy implements Policy {
-  private final Long2ObjectMap<Node> data;
-  private final PolicyStats policyStats;
-  private final EvictionPolicy policy;
-  private final Admittor admittor;
-  private final int maximumSize;
-  private final Node sentinel;
+  final Long2ObjectMap<Node> data;
+  final PolicyStats policyStats;
+  final EvictionPolicy policy;
+  final Admittor admittor;
+  final int maximumSize;
+  final Node sentinel;
 
   public LinkedPolicy(Admission admission, EvictionPolicy policy, Config config) {
     this.policyStats = new PolicyStats(admission.format("linked." + policy.label()));
@@ -185,12 +184,12 @@ public final class LinkedPolicy implements Policy {
 
   /** A node on the double-linked list. */
   static final class Node {
-    private final Node sentinel;
+    final Node sentinel;
 
-    private boolean marked;
-    private Node prev;
-    private Node next;
-    private long key;
+    boolean marked;
+    Node prev;
+    Node next;
+    long key;
 
     /** Creates a new sentinel node. */
     public Node() {
@@ -221,21 +220,6 @@ public final class LinkedPolicy implements Policy {
       next.prev = prev;
       prev = next = null;
       key = Long.MIN_VALUE;
-    }
-
-    /** Moves the node to the head. */
-    public void moveToHead() {
-      checkState(key != Long.MIN_VALUE);
-
-      // unlink
-      prev.next = next;
-      next.prev = prev;
-
-      // link
-      next = sentinel.next;
-      prev = sentinel;
-      sentinel.next = this;
-      next.prev = this;
     }
 
     /** Moves the node to the tail. */

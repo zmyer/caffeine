@@ -21,6 +21,7 @@ import static com.github.benmanes.caffeine.cache.BLCHeader.DrainStatusRef.PROCES
 import static com.github.benmanes.caffeine.cache.BLCHeader.DrainStatusRef.REQUIRED;
 import static com.github.benmanes.caffeine.cache.testing.HasRemovalNotifications.hasRemovalNotifications;
 import static com.github.benmanes.caffeine.cache.testing.HasStats.hasEvictionCount;
+import static com.github.benmanes.caffeine.testing.Awaits.await;
 import static java.util.Arrays.asList;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -36,6 +37,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -49,6 +51,7 @@ import com.github.benmanes.caffeine.cache.testing.CacheContext;
 import com.github.benmanes.caffeine.cache.testing.CacheProvider;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.CacheExecutor;
+import com.github.benmanes.caffeine.cache.testing.CacheSpec.CacheExpiry;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.CacheWeigher;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.Compute;
 import com.github.benmanes.caffeine.cache.testing.CacheSpec.ExecutorFailure;
@@ -134,7 +137,7 @@ public final class BoundedLocalCacheTest {
   @Test
   public void putWeighted_noOverflow() {
     Cache<Integer, Integer> cache = Caffeine.newBuilder()
-        .executor(CacheExecutor.DIRECT.get())
+        .executor(CacheExecutor.DIRECT.create())
         .weigher(CacheWeigher.MAX_VALUE)
         .maximumWeight(Long.MAX_VALUE)
         .build();
@@ -178,7 +181,7 @@ public final class BoundedLocalCacheTest {
 
       checkStatus(node, Status.DEAD);
       assertThat(localCache.containsKey(newEntry.getKey()), is(true));
-      assertThat(cache, hasRemovalNotifications(context, 1, RemovalCause.EXPLICIT));
+      Awaits.await().until(() -> cache, hasRemovalNotifications(context, 1, RemovalCause.EXPLICIT));
     } finally {
       localCache.evictionLock.unlock();
     }
@@ -241,6 +244,97 @@ public final class BoundedLocalCacheTest {
     assertThat(cache.asMap().size(), is(equalTo(expect.length)));
     assertThat(cache.asMap().keySet(), containsInAnyOrder(expect));
     assertThat(evictionList, is(equalTo(asList(expect))));
+  }
+
+  @Test(groups = "slow")
+  public void evict_update() {
+    Integer key = 0;
+    Integer oldValue = 1;
+    Integer newValue = 2;
+
+    Thread evictor = Thread.currentThread();
+    AtomicBoolean started = new AtomicBoolean();
+    AtomicBoolean writing = new AtomicBoolean();
+    AtomicInteger evictedValue = new AtomicInteger();
+    AtomicInteger removedValues = new AtomicInteger();
+    AtomicInteger previousValue = new AtomicInteger();
+
+    CacheWriter<Integer, Integer> writer = new CacheWriter<Integer, Integer>() {
+      @Override public void write(Integer key, Integer value) {
+        if (started.get()) {
+          writing.set(true);
+          await().until(evictor::getState, is(Thread.State.BLOCKED));
+        }
+      }
+      @Override public void delete(Integer key, Integer value, RemovalCause cause) {
+        evictedValue.set(value);
+      }
+    };
+    RemovalListener<Integer, Integer> listener = (k, v, cause) -> removedValues.addAndGet(v);
+
+    Cache<Integer, Integer> cache = Caffeine.newBuilder()
+        .removalListener(listener)
+        .executor(Runnable::run)
+        .maximumSize(100)
+        .writer(writer)
+        .build();
+    BoundedLocalCache<Integer, Integer> localCache = asBoundedLocalCache(cache);
+    cache.put(key, oldValue);
+    started.set(true);
+
+    ConcurrentTestHarness.execute(() -> previousValue.set(localCache.put(key, newValue)));
+    await().untilTrue(writing);
+
+    Node<Integer, Integer> node = localCache.data.values().iterator().next();
+    localCache.evictEntry(node, RemovalCause.SIZE, 0L);
+
+    await().untilAtomic(evictedValue, is(newValue));
+    await().untilAtomic(previousValue, is(oldValue));
+    await().untilAtomic(removedValues, is(oldValue + newValue));
+  }
+
+  @Test(groups = "slow")
+  public void clear_update() {
+    Integer key = 0;
+    Integer oldValue = 1;
+    Integer newValue = 2;
+
+    Thread invalidator = Thread.currentThread();
+    AtomicBoolean started = new AtomicBoolean();
+    AtomicBoolean writing = new AtomicBoolean();
+    AtomicInteger clearedValue = new AtomicInteger();
+    AtomicInteger removedValues = new AtomicInteger();
+    AtomicInteger previousValue = new AtomicInteger();
+
+    CacheWriter<Integer, Integer> writer = new CacheWriter<Integer, Integer>() {
+      @Override public void write(Integer key, Integer value) {
+        if (started.get()) {
+          writing.set(true);
+          await().until(invalidator::getState, is(Thread.State.BLOCKED));
+        }
+      }
+      @Override public void delete(Integer key, Integer value, RemovalCause cause) {
+        clearedValue.set(value);
+      }
+    };
+    RemovalListener<Integer, Integer> listener = (k, v, cause) -> removedValues.addAndGet(v);
+
+    Cache<Integer, Integer> cache = Caffeine.newBuilder()
+        .removalListener(listener)
+        .executor(Runnable::run)
+        .maximumSize(100)
+        .writer(writer)
+        .build();
+    cache.put(key, oldValue);
+    started.set(true);
+
+    ConcurrentTestHarness.execute(() -> previousValue.set(cache.asMap().put(key, newValue)));
+    await().untilTrue(writing);
+    cache.asMap().clear();
+
+    await().untilAtomic(clearedValue, is(newValue));
+    await().untilAtomic(previousValue, is(oldValue));
+    await().untilAtomic(removedValues, is(oldValue + newValue));
   }
 
   @Test(dataProvider = "caches")
@@ -338,10 +432,9 @@ public final class BoundedLocalCacheTest {
       population = Population.EMPTY, maximumSize = Maximum.FULL)
   public void exceedsMaximumBufferSize_onWrite(Cache<Integer, Integer> cache, CacheContext context) {
     BoundedLocalCache<Integer, Integer> localCache = asBoundedLocalCache(cache);
-    Node<Integer, Integer> dummy = localCache.nodeFactory.newNode(null, null, null, 1, 0);
 
     boolean[] ran = new boolean[1];
-    localCache.afterWrite(dummy, () -> ran[0] = true, 0);
+    localCache.afterWrite(() -> ran[0] = true);
     assertThat(ran[0], is(true));
 
     assertThat(localCache.writeBuffer().size(), is(0));
@@ -351,7 +444,7 @@ public final class BoundedLocalCacheTest {
   @CacheSpec(compute = Compute.SYNC, implementation = Implementation.Caffeine,
       population = Population.EMPTY, maximumSize = Maximum.FULL, weigher = CacheWeigher.DEFAULT,
       expireAfterAccess = Expire.DISABLED, expireAfterWrite = Expire.DISABLED,
-      keys = ReferenceType.STRONG, values = ReferenceType.STRONG)
+      expiry = CacheExpiry.DISABLED, keys = ReferenceType.STRONG, values = ReferenceType.STRONG)
   public void fastpath(Cache<Integer, Integer> cache, CacheContext context) {
     BoundedLocalCache<Integer, Integer> localCache = asBoundedLocalCache(cache);
     assertThat(localCache.skipReadBuffer(), is(true));
@@ -387,7 +480,7 @@ public final class BoundedLocalCacheTest {
 
     int[] triggered = { 0 };
     Runnable triggerTask = () -> triggered[0] = 1 + expectedCount[0];
-    localCache.afterWrite(null, triggerTask, 0L);
+    localCache.afterWrite(triggerTask);
 
     assertThat(processed[0], is(expectedCount[0]));
     assertThat(triggered[0], is(expectedCount[0] + 1));

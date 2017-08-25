@@ -56,10 +56,11 @@ public class GetPutBenchmark {
     "Cache2k",
     "Ehcache2_Lru",
     "Ehcache3",
-    "Infinispan_Old_Lru",
-    "Infinispan_New_Lru",
+    "ExpiringMap_Fifo",
+    "ExpiringMap_Lru",
     "TCache_Lfu",
     "TCache_Lru",
+    "Rapidoid",
   })
   CacheType cacheType;
 
